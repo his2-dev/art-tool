@@ -23,6 +23,7 @@ from tools.news_poster import generate_news_poster
 from tools.article_parser import parse_article
 
 HEADLINE_MAX = 11  # 공백 포함 권장 최대 글자수
+SCALE_OPTIONS = [1.0, 1.5, 2.0]
 
 
 def _char_count_label(text: str, label: str) -> str:
@@ -115,6 +116,9 @@ with tab_auto:
                 try:
                     meta = parse_article(article_url)
                     st.session_state["parsed"] = meta
+                    st.session_state["auto_h1"] = meta.get("suggested_headline1", "")
+                    st.session_state["auto_h2"] = meta.get("suggested_headline2", "")
+                    st.session_state["auto_source"] = f"© {meta.get('source', '')}" if meta.get("source") else ""
                 except Exception as e:
                     st.error(f"기사 파싱 실패: {e}")
 
@@ -129,12 +133,12 @@ with tab_auto:
 
             auto_h1 = st.text_input(
                 f"헤드라인 1줄 (권장 {HEADLINE_MAX}자 이내)",
-                value="", placeholder="6~9자 직접 작성",
+                value=st.session_state.get("auto_h1", ""), placeholder="6~9자 직접 작성",
                 key="auto_h1",
             )
             auto_h2 = st.text_input(
                 f"헤드라인 2줄 (권장 {HEADLINE_MAX}자 이내)",
-                value="", placeholder="6~9자 직접 작성",
+                value=st.session_state.get("auto_h2", ""), placeholder="6~9자 직접 작성",
                 key="auto_h2",
             )
             # 글자수 카운터
@@ -145,7 +149,7 @@ with tab_auto:
 
             auto_source = st.text_input(
                 "출처 (비우면 자동 적용)",
-                value=f"© {meta.get('source', '')}",
+                value=st.session_state.get("auto_source", f"© {meta.get('source', '')}"),
                 key="auto_source",
             )
 
@@ -173,8 +177,8 @@ with tab_auto:
                 )
             with col3:
                 auto_scale = st.selectbox(
-                    "배율", [1, 2], index=0,
-                    format_func=lambda x: f"{x}x ({1080*x}×{1350*x})",
+                    "배율", SCALE_OPTIONS, index=1,
+                    format_func=lambda x: f"{x}x ({int(1080*x)}×{int(1350*x)})",
                     key="auto_scale",
                 )
 
@@ -234,8 +238,8 @@ with tab_manual:
             )
         with col3:
             scale = st.selectbox(
-                "배율", [1, 2], index=0,
-                format_func=lambda x: f"{x}x ({1080*x}×{1350*x})",
+                "배율", SCALE_OPTIONS, index=1,
+                format_func=lambda x: f"{x}x ({int(1080*x)}×{int(1350*x)})",
                 key="m_scale",
             )
 

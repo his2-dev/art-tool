@@ -21,7 +21,7 @@ from io import BytesIO
 from datetime import date
 
 import requests
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 # ── 상수 ──────────────────────────────────────────────
 CANVAS_W, CANVAS_H = 1080, 1350
@@ -109,7 +109,10 @@ def crop_cover(img: Image.Image, target_w: int, target_h: int) -> Image.Image:
         top = (src_h - new_h) // 2
         img = img.crop((0, top, src_w, top + new_h))
 
-    return img.resize((target_w, target_h), Image.LANCZOS)
+    resized = img.resize((target_w, target_h), Image.LANCZOS)
+    if target_w > src_w or target_h > src_h:
+        resized = resized.filter(ImageFilter.UnsharpMask(radius=1.8, percent=130, threshold=3))
+    return resized
 
 
 def draw_gradient_shadow(canvas: Image.Image, canvas_w: int, canvas_h: int):
@@ -242,28 +245,29 @@ def generate_news_poster(
     image_path: str = None,
     badge_text: str = None,
     output_path: str = None,
-    scale: int = 1,
+    scale: float = 1,
     logo_color: str = "auto",
 ) -> str:
     """뉴스 게시물 이미지를 생성하고 저장합니다."""
     if scale < 1:
         raise ValueError("scale 은 1 이상이어야 합니다.")
 
-    canvas_w = CANVAS_W * scale
-    canvas_h = CANVAS_H * scale
-    logo_pos = (LOGO_POS[0] * scale, LOGO_POS[1] * scale)
-    logo_size = (LOGO_SIZE[0] * scale, LOGO_SIZE[1] * scale)
-    headline1_y = HEADLINE1_Y * scale
-    headline2_y = HEADLINE2_Y * scale
-    source_right_margin = SOURCE_RIGHT_MARGIN * scale
-    source_y = SOURCE_Y * scale
-    badge_x = BADGE_X * scale
-    badge_y = BADGE_Y * scale
-    badge_w = BADGE_W * scale
-    badge_h = BADGE_H * scale
-    badge_text_x = BADGE_TEXT_X * scale
-    badge_text_y = BADGE_TEXT_Y * scale
-    badge_radius = BADGE_RADIUS * scale
+    scale_value = float(scale)
+    canvas_w = int(round(CANVAS_W * scale_value))
+    canvas_h = int(round(CANVAS_H * scale_value))
+    logo_pos = (int(round(LOGO_POS[0] * scale_value)), int(round(LOGO_POS[1] * scale_value)))
+    logo_size = (int(round(LOGO_SIZE[0] * scale_value)), int(round(LOGO_SIZE[1] * scale_value)))
+    headline1_y = int(round(HEADLINE1_Y * scale_value))
+    headline2_y = int(round(HEADLINE2_Y * scale_value))
+    source_right_margin = int(round(SOURCE_RIGHT_MARGIN * scale_value))
+    source_y = int(round(SOURCE_Y * scale_value))
+    badge_x = int(round(BADGE_X * scale_value))
+    badge_y = int(round(BADGE_Y * scale_value))
+    badge_w = int(round(BADGE_W * scale_value))
+    badge_h = int(round(BADGE_H * scale_value))
+    badge_text_x = int(round(BADGE_TEXT_X * scale_value))
+    badge_text_y = int(round(BADGE_TEXT_Y * scale_value))
+    badge_radius = int(round(BADGE_RADIUS * scale_value))
 
     # 1. 배경 이미지
     if image_path and os.path.exists(image_path):
@@ -287,8 +291,8 @@ def generate_news_poster(
 
     # 4. 폰트 로드
     try:
-        font_headline = ImageFont.truetype(PRETENDARD_BOLD, 96 * scale)
-        font_source = ImageFont.truetype(PRETENDARD_REGULAR, 24 * scale)
+        font_headline = ImageFont.truetype(PRETENDARD_BOLD, int(round(96 * scale_value)))
+        font_source = ImageFont.truetype(PRETENDARD_REGULAR, int(round(24 * scale_value)))
     except OSError as e:
         print(f"[오류] 폰트 로드 실패: {e}")
         print("Pretendard Bold, Regular 설치 필요")
@@ -297,7 +301,7 @@ def generate_news_poster(
     # 5. 뱃지 (옵션, 기본 비활성)
     if badge_text:
         try:
-            font_badge = ImageFont.truetype(CLASH_DISPLAY_MEDIUM, 48 * scale)
+            font_badge = ImageFont.truetype(CLASH_DISPLAY_MEDIUM, int(round(48 * scale_value)))
             draw_badge(
                 canvas_rgb,
                 badge_text,
@@ -346,7 +350,7 @@ def main():
     parser.add_argument("--image_path", help="배경 이미지 로컬 경로")
     parser.add_argument("--badge", default=None, help="뱃지 텍스트 (미입력 시 뱃지 없음)")
     parser.add_argument("--output", help="출력 파일 경로")
-    parser.add_argument("--scale", type=int, default=1, help="출력 배율 (기본 1 = 1080x1350, 2 = 2160x2700)")
+    parser.add_argument("--scale", type=float, default=1, help="출력 배율 (1=1080x1350, 1.5=1620x2025, 2=2160x2700)")
     parser.add_argument("--logo-color", default="auto", choices=["auto", "white", "black"], help="로고 색상 (기본: auto)")
     args = parser.parse_args()
 
