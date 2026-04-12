@@ -1,0 +1,4 @@
+requests>=2.32.0
+Pillow>=11.0.0
+streamlit>=1.40.0
+beautifulsoup4>=4.12.0

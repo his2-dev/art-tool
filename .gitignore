@@ -1,0 +1,31 @@
+# 생성된 이미지 출력물
+output/
+
+# Python 캐시
+__pycache__/
+*.py[cod]
+*.pyc
+*.pyo
+*.pyd
+
+# 임시 파일
+*.tmp.*
+*.tmp
+*.bak
+
+# 환경변수 / 시크릿
+.env
+.env.*
+*.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Streamlit 로컬 설정
+.streamlit/secrets.toml
