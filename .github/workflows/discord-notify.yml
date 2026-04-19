@@ -5,6 +5,12 @@ on:
     branches: [main]
     paths:
       - 'output/news/**.json'
+  workflow_dispatch:
+    inputs:
+      meta_path:
+        description: '전송할 메타 JSON 경로 (예: output/news/2026-04-19.json). 비우면 가장 최근 .json 자동 선택.'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -31,21 +37,31 @@ jobs:
       - name: Install dependencies
         run: pip install requests==2.32.3
 
-      - name: Collect newly added meta files
+      - name: Collect meta files to send
         id: find
+        env:
+          MANUAL_META: ${{ inputs.meta_path }}
         run: |
           set -euo pipefail
-          BEFORE="${{ github.event.before }}"
-          AFTER="${{ github.sha }}"
-          # 최초 푸시/force push 대응: before가 0...0이면 HEAD~1과 비교
-          if [[ "$BEFORE" =~ ^0+$ ]]; then
-            BEFORE="$(git rev-parse HEAD~1 2>/dev/null || echo '')"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # 수동 실행: 입력값 우선, 비어있으면 가장 최근 JSON 자동 선택
+            if [ -n "${MANUAL_META:-}" ]; then
+              CHANGED=("$MANUAL_META")
+            else
+              mapfile -t CHANGED < <(ls -1t output/news/*.json 2>/dev/null | head -1)
+            fi
+          else
+            BEFORE="${{ github.event.before }}"
+            AFTER="${{ github.sha }}"
+            if [[ "$BEFORE" =~ ^0+$ ]]; then
+              BEFORE="$(git rev-parse HEAD~1 2>/dev/null || echo '')"
+            fi
+            if [ -z "$BEFORE" ]; then
+              echo "files=" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            mapfile -t CHANGED < <(git diff --name-only --diff-filter=AM "$BEFORE" "$AFTER" -- 'output/news/*.json' | sort -u)
           fi
-          if [ -z "$BEFORE" ]; then
-            echo "files=" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          mapfile -t CHANGED < <(git diff --name-only --diff-filter=AM "$BEFORE" "$AFTER" -- 'output/news/*.json' | sort -u)
           {
             echo "files<<EOF"
             printf '%s\n' "${CHANGED[@]}"
