@@ -1,5 +1,10 @@
-# 생성된 이미지 출력물
-output/
+# 생성된 이미지 출력물 (Discord 전송용 뉴스 썸네일은 예외로 추적)
+output/*
+!output/news/
+output/news/*
+!output/news/*.png
+!output/news/*.json
+!output/news/.gitkeep
 
 # Python 캐시
 __pycache__/

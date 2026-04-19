@@ -1,0 +1,73 @@
+name: Discord Notify
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'output/news/**.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: discord-notify-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests==2.32.3
+
+      - name: Collect newly added meta files
+        id: find
+        run: |
+          set -euo pipefail
+          BEFORE="${{ github.event.before }}"
+          AFTER="${{ github.sha }}"
+          # 최초 푸시/force push 대응: before가 0...0이면 HEAD~1과 비교
+          if [[ "$BEFORE" =~ ^0+$ ]]; then
+            BEFORE="$(git rev-parse HEAD~1 2>/dev/null || echo '')"
+          fi
+          if [ -z "$BEFORE" ]; then
+            echo "files=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          mapfile -t CHANGED < <(git diff --name-only --diff-filter=AM "$BEFORE" "$AFTER" -- 'output/news/*.json' | sort -u)
+          {
+            echo "files<<EOF"
+            printf '%s\n' "${CHANGED[@]}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Notify Discord
+        if: steps.find.outputs.files != ''
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DISCORD_WEBHOOK_URL:-}" ]; then
+            echo "::error::DISCORD_WEBHOOK_URL secret is not set"
+            exit 1
+          fi
+          while IFS= read -r meta; do
+            [ -z "$meta" ] && continue
+            if [ ! -f "$meta" ]; then
+              echo "::warning::missing $meta, skip"
+              continue
+            fi
+            echo "::notice::sending $meta"
+            python tools/discord_notify_ci.py "$meta"
+          done <<< "${{ steps.find.outputs.files }}"

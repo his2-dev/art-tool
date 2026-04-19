@@ -86,15 +86,41 @@ python tools/news_poster.py \
 
 ---
 
-## Discord 자동 전송
+## Discord 자동 전송 (GitHub Actions 기반)
+
+Claude Code 웹 환경에서는 Discord 직접 호출이 차단되므로, **메타 JSON + 이미지 PNG를 커밋·푸시하면 GitHub Actions가 자동 전송**하는 구조를 사용한다.
 
 | 항목 | 내용 |
 |------|------|
-| 전송 스크립트 | `tools/discord_sender.py` |
-| Webhook URL | `.env`에 보관 (코드에 하드코딩되어 있으나 변경 시 수정) |
-| 전송 내용 | 이미지 첨부 + embed(뉴스 제목, 헤드라인, 출처, 캡션, 후보 기사 3건, 앱 링크) |
-| 주의 | Windows에서 curl은 한글 깨짐 → 반드시 Python `requests`로 전송 |
+| 워크플로 | `.github/workflows/discord-notify.yml` |
+| CI 헬퍼 | `tools/discord_notify_ci.py` |
+| 직접 호출 라이브러리 | `tools/discord_sender.py` (로컬·서버용) |
+| Secret | GitHub 레포 Settings → Secrets and variables → Actions → `DISCORD_WEBHOOK_URL` |
+| 트리거 | `output/news/**.json` 추가/수정 push |
 
+### 게시물 발행 플로우
+1. `news_poster.py` 실행 → `output/news/YYYY-MM-DD_키워드.png` 생성
+2. **같은 경로에 메타 JSON** (`.json`) 작성 — 아래 스키마
+3. 두 파일을 커밋·푸시 → GitHub Actions가 Discord 채널로 전송
+
+### 메타 JSON 스키마
+```json
+{
+  "news_title": "기사 제목",
+  "news_url": "기사 URL",
+  "headline1": "헤드라인 1줄",
+  "headline2": "헤드라인 2줄",
+  "source": "© 출처",
+  "caption": "캡션 전문 (해시태그 포함)",
+  "candidates": [
+    {"title": "후보1 제목", "url": "..."},
+    {"title": "후보2 제목", "url": "..."},
+    {"title": "후보3 제목", "url": "..."}
+  ]
+}
+```
+
+### 로컬·서버에서 수동 전송 (선택)
 ```python
 from tools.discord_sender import send_news_to_discord
 send_news_to_discord(
@@ -108,6 +134,8 @@ send_news_to_discord(
     candidates=[{"title": "후보 제목", "url": "후보 URL"}, ...],
 )
 ```
+
+> 주의: Webhook URL은 `.env` 또는 환경변수 `DISCORD_WEBHOOK_URL`에만 보관. 절대 코드·커밋에 포함 금지. Windows에서 curl은 한글 깨짐 → 반드시 Python `requests` 사용.
 
 ---
 
