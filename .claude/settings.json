@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "defaultMode": "bypassPermissions"
+  },
+  "sandbox": {
+    "network": {
+      "allowedDomains": [
+        "discord.com",
+        "*.discord.com"
+      ]
+    }
+  }
+}
