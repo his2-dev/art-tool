@@ -60,6 +60,7 @@ jobs:
               echo "files=" >> "$GITHUB_OUTPUT"
               exit 0
             fi
+            git config core.quotepath false
             mapfile -t CHANGED < <(git diff --name-only --diff-filter=AM "$BEFORE" "$AFTER" -- 'output/news/*.json' | sort -u)
           fi
           {
