@@ -5,6 +5,10 @@ output/news/*
 !output/news/*.png
 !output/news/*.json
 !output/news/.gitkeep
+!output/pending/
+output/pending/*
+!output/pending/*.png
+!output/pending/*.json
 
 # Python 캐시
 __pycache__/
