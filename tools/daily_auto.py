@@ -1,49 +1,46 @@
 """
 매일 자동 뉴스 선별 & Discord 전송 (GitHub Actions 전용).
 
-동작:
-1. 화이트리스트 RSS 피드에서 최신 아트/문화 기사 수집
-2. 각 후보에 대해 og:image 존재 + 다운로드 가능 여부 검증
-3. 검증 통과한 첫 후보로 메타 JSON 생성 + discord_notify_ci 호출
-
-회색 이미지(og:image 누락/차단) 방지를 위해:
-- 정부/공공기관 도메인(kh.or.kr, korea.kr 등)은 블랙리스트
-- og:image URL을 HEAD 요청으로 실제 접근 가능한지 확인
-- 실패 시 다음 후보로 스킵
+개선 사항:
+- pubDate 파싱으로 당일/최근 기사 우선 선별 (시의성)
+- og:image 실제 다운로드해서 크기·비율 검증 (세로 비율 + 고해상도 우선)
+- 기사 본문 내 이미지도 스캔해 og:image보다 좋은 게 있으면 대체
 """
 
 import json
 import os
 import re
 import sys
-from datetime import date
-from urllib.parse import urlparse
+from datetime import date, datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
+from io import BytesIO
+from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
+from PIL import Image
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from tools.article_parser import parse_article  # noqa: E402
 from tools.discord_notify_ci import main as notify_main  # noqa: E402
 
-# 아트/문화 RSS 피드 (순서대로 시도)
+# ── 설정 ────────────────────────────────────────────────────────────────────
+
 RSS_FEEDS = [
     ("https://www.news1.kr/rss/S1N5", "뉴스1"),
     ("https://rss.joins.com/joins_culture_list.xml", "중앙일보"),
-    ("https://www.mk.co.kr/rss/40300002/", "매일경제 문화"),
+    ("https://www.mk.co.kr/rss/40300002/", "매일경제"),
     ("https://design.co.kr/feed", "디자인프레스"),
+    ("https://biz.heraldcorp.com/rss/0001016.xml", "헤럴드경제"),
 ]
 
-# 선별 키워드 (하나라도 매칭되면 후보)
 ART_KEYWORDS = [
     "전시", "미술", "아트", "갤러리", "박물관", "예술", "작가",
-    "비엔날레", "아트페어", "회고전", "특별전", "개관", "개막",
+    "비엔날레", "아트페어", "회고전", "특별전", "개관", "개막", "뮤지엄",
 ]
 
-# 제외 도메인 (og:image 차단 or 품질 낮음)
 BLOCKED_DOMAINS = {
     "kh.or.kr", "korea.kr", "seoul.go.kr", "mmca.go.kr", "sema.seoul.go.kr",
     "cha.go.kr", "gov.kr",
@@ -55,8 +52,15 @@ HEADERS = {
     "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
 }
 
+# 이미지 품질 기준
+MIN_WIDTH = 800          # 최소 가로 (px)
+MIN_HEIGHT = 600         # 최소 세로 (px)
+MIN_PORTRAIT_RATIO = 0.6 # height/width 최소 비율 (1.0=정사각, >1=세로)
 
-def fetch_rss(url: str):
+
+# ── RSS 파싱 ─────────────────────────────────────────────────────────────────
+
+def fetch_rss(url: str) -> list[dict]:
     r = requests.get(url, headers=HEADERS, timeout=15)
     r.raise_for_status()
     soup = BeautifulSoup(r.content, "xml")
@@ -66,11 +70,26 @@ def fetch_rss(url: str):
         link_tag = it.find("link")
         if not (title_tag and link_tag):
             continue
+        pub = it.find("pubDate") or it.find("pubdate")
         items.append({
             "title": (title_tag.text or "").strip(),
             "url": (link_tag.text or "").strip(),
+            "pub_raw": (pub.text or "").strip() if pub else "",
         })
     return items
+
+
+def item_age_hours(item: dict) -> float:
+    """기사 발행 후 경과 시간 (시간 단위). 날짜 없으면 999 반환."""
+    raw = item.get("pub_raw", "")
+    if not raw:
+        return 999
+    try:
+        dt = parsedate_to_datetime(raw).astimezone(timezone.utc)
+        age = datetime.now(timezone.utc) - dt
+        return age.total_seconds() / 3600
+    except Exception:
+        return 999
 
 
 def is_art_related(title: str) -> bool:
@@ -82,88 +101,202 @@ def is_blocked(url: str) -> bool:
     return any(host == b or host.endswith("." + b) for b in BLOCKED_DOMAINS)
 
 
-def verify_og_image(article_url: str) -> str:
-    """기사 URL에서 og:image를 추출하고 실제 다운로드 가능한지 검증.
+# ── 이미지 품질 검증 ──────────────────────────────────────────────────────────
 
-    Returns:
-        사용 가능한 이미지 URL (검증 실패 시 빈 문자열)
-    """
+def download_image(url: str) -> Image.Image | None:
+    """이미지 URL을 다운로드해 PIL Image 반환. 실패 시 None."""
     try:
-        meta = parse_article(article_url)
-    except Exception as e:
-        print(f"  [skip] parse 실패: {e}", file=sys.stderr)
-        return ""
-
-    image_url = meta.get("image_url", "")
-    if not image_url:
-        print("  [skip] og:image 없음", file=sys.stderr)
-        return ""
-
-    # 실제 접근 가능한지 HEAD 요청
-    try:
-        r = requests.head(image_url, headers=HEADERS, timeout=10, allow_redirects=True)
+        r = requests.get(url, headers=HEADERS, timeout=20, allow_redirects=True)
         if r.status_code != 200:
-            print(f"  [skip] image HEAD {r.status_code}: {image_url[:80]}", file=sys.stderr)
-            return ""
+            return None
         ct = r.headers.get("content-type", "")
         if not ct.startswith("image/"):
-            print(f"  [skip] not image (ct={ct}): {image_url[:80]}", file=sys.stderr)
-            return ""
+            return None
+        return Image.open(BytesIO(r.content)).convert("RGB")
+    except Exception:
+        return None
+
+
+def image_score(w: int, h: int) -> float:
+    """크기와 비율로 이미지 점수 계산. 높을수록 좋음.
+    - 세로 비율 가중치: portrait일수록 우선
+    - 해상도 가중치: 클수록 우선
+    """
+    ratio = h / max(w, 1)
+    # 0.8(포스터 비율)에 가까울수록 높은 비율 점수
+    ratio_score = min(ratio, 2.0) / 2.0
+    size_score = min(w * h, 4_000_000) / 4_000_000
+    return ratio_score * 0.6 + size_score * 0.4
+
+
+def find_best_image(article_url: str) -> tuple[str, int, int] | tuple[None, None, None]:
+    """기사에서 가장 좋은 이미지 URL과 크기 반환.
+
+    1. og:image 시도
+    2. twitter:image 시도
+    3. 기사 본문 <img> 태그 스캔
+    → 유효한 것들 중 image_score 가장 높은 것 반환
+    Returns:
+        (image_url, width, height) or (None, None, None)
+    """
+    try:
+        r = requests.get(article_url, headers=HEADERS, timeout=15)
+        r.raise_for_status()
+        r.encoding = r.apparent_encoding
+        soup = BeautifulSoup(r.text, "html.parser")
     except Exception as e:
-        print(f"  [skip] image HEAD 실패: {e}", file=sys.stderr)
-        return ""
+        print(f"  [skip] 기사 fetch 실패: {e}", file=sys.stderr)
+        return None, None, None
 
-    return image_url
+    # 후보 이미지 URL 수집
+    candidates = []
+
+    def _add(url: str):
+        url = url.strip()
+        if url and url.startswith("http"):
+            candidates.append(url)
+
+    og = soup.find("meta", property="og:image")
+    if og and og.get("content"):
+        _add(og["content"])
+
+    tw = soup.find("meta", attrs={"name": "twitter:image"})
+    if tw and tw.get("content"):
+        _add(tw["content"])
+
+    # 기사 본문 img 태그 (넓이 200 이상 힌트 우선)
+    for img in soup.find_all("img", src=True):
+        src = img.get("src", "")
+        if not src:
+            continue
+        # 상대 경로 변환
+        if src.startswith("//"):
+            src = "https:" + src
+        elif src.startswith("/"):
+            parsed = urlparse(article_url)
+            src = f"{parsed.scheme}://{parsed.netloc}{src}"
+        if not src.startswith("http"):
+            continue
+        # 아이콘·로고 제외
+        if any(x in src.lower() for x in ["logo", "icon", "btn", "badge", "avatar", "ad"]):
+            continue
+        w_hint = img.get("width", "")
+        if w_hint and w_hint.isdigit() and int(w_hint) < 200:
+            continue
+        candidates.append(src)
+
+    if not candidates:
+        print("  [skip] 이미지 후보 없음", file=sys.stderr)
+        return None, None, None
+
+    # 중복 제거 (순서 유지)
+    seen = set()
+    unique = []
+    for c in candidates:
+        if c not in seen:
+            seen.add(c)
+            unique.append(c)
+
+    # 각 후보 다운로드 & 점수 계산 (최대 5개)
+    best_url, best_w, best_h, best_score = None, 0, 0, -1.0
+    for url in unique[:5]:
+        img_obj = download_image(url)
+        if img_obj is None:
+            continue
+        w, h = img_obj.size
+        if w < MIN_WIDTH or h < MIN_HEIGHT:
+            print(f"  [skip] 너무 작음 {w}x{h}: {url[:60]}", file=sys.stderr)
+            continue
+        ratio = h / w
+        if ratio < MIN_PORTRAIT_RATIO:
+            print(f"  [skip] 가로 비율 {ratio:.2f} (최소 {MIN_PORTRAIT_RATIO}): {url[:60]}", file=sys.stderr)
+            continue
+        score = image_score(w, h)
+        print(f"  [후보] {w}x{h} ratio={ratio:.2f} score={score:.2f}: {url[:60]}", file=sys.stderr)
+        if score > best_score:
+            best_url, best_w, best_h, best_score = url, w, h, score
+
+    if best_url:
+        return best_url, best_w, best_h
+    return None, None, None
 
 
-def pick_candidate():
-    """RSS 피드에서 검증 통과한 첫 후보 반환."""
+# ── 후보 선별 ─────────────────────────────────────────────────────────────────
+
+def pick_candidate(max_age_hours: float = 36.0):
+    """RSS에서 시의성 + 이미지 품질 통과한 첫 후보 반환.
+
+    max_age_hours 이내 기사 우선. 없으면 72h로 재시도.
+    """
+    for age_limit in [max_age_hours, 72.0]:
+        print(f"\n[선별] 최대 {age_limit:.0f}시간 이내 기사 탐색", file=sys.stderr)
+        result = _pick_from_feeds(age_limit)
+        if result:
+            return result
+    print("[오류] 모든 RSS 소진, 후보 없음", file=sys.stderr)
+    return None
+
+
+def _pick_from_feeds(age_limit: float):
     for feed_url, source_name in RSS_FEEDS:
-        print(f"[RSS] {feed_url}", file=sys.stderr)
+        print(f"\n[RSS] {source_name} {feed_url}", file=sys.stderr)
         try:
             items = fetch_rss(feed_url)
         except Exception as e:
             print(f"  [skip] fetch 실패: {e}", file=sys.stderr)
             continue
 
-        art_items = [it for it in items if is_art_related(it["title"]) and not is_blocked(it["url"])]
-        print(f"  후보 {len(art_items)}건", file=sys.stderr)
+        # 아트 관련 + 블랙리스트 제외
+        art_items = [
+            it for it in items
+            if is_art_related(it["title"]) and not is_blocked(it["url"])
+        ]
+        # 시의성 필터
+        fresh_items = [it for it in art_items if item_age_hours(it) <= age_limit]
 
-        for item in art_items[:8]:
-            print(f"  검증 시도: {item['title'][:50]}", file=sys.stderr)
-            image_url = verify_og_image(item["url"])
-            if image_url:
+        # 최신 순 정렬
+        fresh_items.sort(key=lambda x: item_age_hours(x))
+        print(f"  전체={len(items)} 아트={len(art_items)} 최신={len(fresh_items)}건", file=sys.stderr)
+
+        for item in fresh_items[:6]:
+            age = item_age_hours(item)
+            print(f"  [{age:.1f}h] {item['title'][:50]}", file=sys.stderr)
+            img_url, w, h = find_best_image(item["url"])
+            if img_url:
+                print(f"  ✓ 채택: {w}x{h} {img_url[:60]}", file=sys.stderr)
                 return {
                     "title": item["title"],
                     "url": item["url"],
-                    "image_url": item["url"],  # CI가 og:image 재추출
+                    "direct_image_url": img_url,  # 직접 이미지 URL (CI에서 재다운로드)
                     "source_name": source_name,
+                    "age_hours": age,
                 }
 
     return None
 
 
-def make_headlines(title: str):
+# ── 헤드라인 & 캡션 ──────────────────────────────────────────────────────────
+
+def make_headlines(title: str) -> tuple[str, str]:
     """기사 제목에서 2줄 헤드라인 (각 줄 최대 11자)."""
     clean = re.sub(r"\[[^\]]+\]", "", title)
     clean = re.sub(r"\([^)]+\)", "", clean)
     clean = re.sub(r"[\"'''""]", "", clean)
-    clean = clean.split("…")[0].strip()
+    clean = clean.split("…")[0].split("·")[0].strip()
     clean = re.sub(r"\s+", " ", clean)
 
     words = clean.split()
     if not words:
         return "오늘의", "아트뉴스"
-
     if len(words) == 1:
         w = words[0]
         mid = max(1, len(w) // 2)
-        return w[:mid][:11], w[mid:][:11] or "소식"
+        return w[:mid][:11], (w[mid:][:11] or "소식")
 
     mid = max(1, len(words) // 2)
     line1 = "".join(words[:mid])[:11]
     line2 = "".join(words[mid:])[:11]
-    return line1, line2 or "소식"
+    return line1, (line2 or "소식")
 
 
 def make_caption(title: str, source_name: str) -> str:
@@ -173,18 +306,20 @@ def make_caption(title: str, source_name: str) -> str:
     )
 
 
-def main():
+# ── 메인 ─────────────────────────────────────────────────────────────────────
+
+def main() -> int:
     picked = pick_candidate()
     if not picked:
-        print("[오류] 검증 통과한 후보 없음", file=sys.stderr)
         return 3
 
     h1, h2 = make_headlines(picked["title"])
     today = date.today().isoformat()
+
     meta = {
         "news_title": picked["title"],
         "news_url": picked["url"],
-        "image_url": picked["url"],
+        "image_url": picked["direct_image_url"],  # 검증된 직접 이미지 URL
         "headline1": h1,
         "headline2": h2,
         "source": f"© {picked['source_name']}",
@@ -197,9 +332,11 @@ def main():
     with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
 
-    print(f"[자동 선별] {picked['title']}", file=sys.stderr)
-    print(f"[헤드라인] {h1} / {h2}", file=sys.stderr)
-    print(f"[메타] {meta_path}", file=sys.stderr)
+    age = picked.get("age_hours", 0)
+    print(f"\n[완료] {picked['title']}", file=sys.stderr)
+    print(f"       헤드라인: {h1} / {h2}", file=sys.stderr)
+    print(f"       발행 경과: {age:.1f}시간", file=sys.stderr)
+    print(f"       이미지: {picked['direct_image_url'][:80]}", file=sys.stderr)
 
     sys.argv = ["discord_notify_ci.py", meta_path]
     return notify_main()

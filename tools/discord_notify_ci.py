@@ -35,7 +35,16 @@ from tools.news_poster import generate_news_poster  # noqa: E402
 
 def _is_direct_image_url(url: str) -> bool:
     path = urlparse(url).path.lower()
-    return path.endswith((".jpg", ".jpeg", ".png", ".webp", ".gif"))
+    if path.endswith((".jpg", ".jpeg", ".png", ".webp", ".gif")):
+        return True
+    # 확장자 없어도 CDN URL이면 HEAD로 content-type 확인
+    try:
+        import requests as _req
+        r = _req.head(url, timeout=8, allow_redirects=True,
+                      headers={"User-Agent": "Mozilla/5.0"})
+        return r.status_code == 200 and r.headers.get("content-type", "").startswith("image/")
+    except Exception:
+        return False
 
 
 def _resolve_image_url(image_url: str) -> str:
