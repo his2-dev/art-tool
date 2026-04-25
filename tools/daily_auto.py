@@ -34,11 +34,20 @@ RSS_FEEDS = [
     ("https://www.mk.co.kr/rss/40300002/", "매일경제"),
     ("https://design.co.kr/feed", "디자인프레스"),
     ("https://biz.heraldcorp.com/rss/0001016.xml", "헤럴드경제"),
+    ("https://www.kmib.co.kr/rss/culture.xml", "국민일보"),
+    ("https://www.news1.kr/rss/S1N6", "뉴스1-문화"),
 ]
 
 ART_KEYWORDS = [
     "전시", "미술", "아트", "갤러리", "박물관", "예술", "작가",
     "비엔날레", "아트페어", "회고전", "특별전", "개관", "개막", "뮤지엄",
+    "조각", "회화", "사진전", "설치", "퍼포먼스", "드로잉",
+]
+
+# 고빈도 노출로 제외할 키워드 (너무 자주 등장해 식상해지는 주제)
+OVEREXPOSED_KEYWORDS = [
+    "공연", "뮤지컬", "연극", "클래식", "오페라",
+    "영화", "드라마", "콘서트",
 ]
 
 BLOCKED_DOMAINS = {
@@ -93,7 +102,54 @@ def item_age_hours(item: dict) -> float:
 
 
 def is_art_related(title: str) -> bool:
-    return any(k in title for k in ART_KEYWORDS)
+    if not any(k in title for k in ART_KEYWORDS):
+        return False
+    # 공연/영화 등 시각예술과 거리 먼 항목 제외
+    if any(k in title for k in OVEREXPOSED_KEYWORDS) and not any(
+        k in title for k in ["미술", "아트", "갤러리", "작가", "전시"]
+    ):
+        return False
+    return True
+
+
+def load_recent_published(days: int = 7) -> set[str]:
+    """최근 N일 발행된 JSON에서 news_url 집합 반환 (중복 방지용)."""
+    published_urls: set[str] = set()
+    output_dir = os.path.join(ROOT, "output", "news")
+    if not os.path.isdir(output_dir):
+        return published_urls
+    cutoff = date.today() - timedelta(days=days)
+    for fname in os.listdir(output_dir):
+        if not fname.endswith(".json"):
+            continue
+        # 파일명 날짜 파싱 (YYYY-MM-DD_xxx.json)
+        try:
+            file_date = date.fromisoformat(fname[:10])
+            if file_date < cutoff:
+                continue
+        except ValueError:
+            continue
+        try:
+            with open(os.path.join(output_dir, fname), encoding="utf-8") as f:
+                meta = json.load(f)
+            url = meta.get("news_url", "")
+            if url:
+                published_urls.add(url)
+            # 후보 URL도 수집해 주제 중복 방지
+            for cand in meta.get("candidates", []):
+                if cand.get("url"):
+                    published_urls.add(cand["url"])
+        except Exception:
+            continue
+    return published_urls
+
+
+def extract_key_nouns(title: str) -> set[str]:
+    """제목에서 핵심 고유명사 추출 (3자 이상 연속 한글/영문 단어)."""
+    words = re.findall(r"[가-힣A-Za-z]{3,}", title)
+    # 너무 일반적인 단어 제외
+    stop = {"전시", "개막", "개관", "공개", "특별전", "기획전", "미술관", "갤러리", "박물관"}
+    return {w for w in words if w not in stop}
 
 
 def is_blocked(url: str) -> bool:
@@ -223,21 +279,28 @@ def find_best_image(article_url: str) -> tuple[str, int, int] | tuple[None, None
 
 # ── 후보 선별 ─────────────────────────────────────────────────────────────────
 
-def pick_candidate(max_age_hours: float = 36.0):
+def pick_candidate(max_age_hours: float = 36.0, skip_urls: set[str] | None = None):
     """RSS에서 시의성 + 이미지 품질 통과한 첫 후보 반환.
 
     max_age_hours 이내 기사 우선. 없으면 72h로 재시도.
+    skip_urls: 이미 발행됐거나 이번 세션에 선택된 URL 집합 (중복 방지)
     """
+    if skip_urls is None:
+        skip_urls = load_recent_published(days=7)
+        print(f"[중복제외] 최근 7일 발행 {len(skip_urls)}건 로드", file=sys.stderr)
+
     for age_limit in [max_age_hours, 72.0]:
         print(f"\n[선별] 최대 {age_limit:.0f}시간 이내 기사 탐색", file=sys.stderr)
-        result = _pick_from_feeds(age_limit)
+        result = _pick_from_feeds(age_limit, skip_urls)
         if result:
             return result
     print("[오류] 모든 RSS 소진, 후보 없음", file=sys.stderr)
     return None
 
 
-def _pick_from_feeds(age_limit: float):
+def _pick_from_feeds(age_limit: float, skip_urls: set[str]):
+    # 모든 피드를 먼저 수집 후 섞어서 단일 피드 편중 방지
+    all_fresh: list[dict] = []
     for feed_url, source_name in RSS_FEEDS:
         print(f"\n[RSS] {source_name} {feed_url}", file=sys.stderr)
         try:
@@ -246,31 +309,49 @@ def _pick_from_feeds(age_limit: float):
             print(f"  [skip] fetch 실패: {e}", file=sys.stderr)
             continue
 
-        # 아트 관련 + 블랙리스트 제외
         art_items = [
             it for it in items
             if is_art_related(it["title"]) and not is_blocked(it["url"])
         ]
-        # 시의성 필터
         fresh_items = [it for it in art_items if item_age_hours(it) <= age_limit]
 
-        # 최신 순 정렬
-        fresh_items.sort(key=lambda x: item_age_hours(x))
-        print(f"  전체={len(items)} 아트={len(art_items)} 최신={len(fresh_items)}건", file=sys.stderr)
+        # 이미 발행된 URL 제외
+        deduped = [it for it in fresh_items if it["url"] not in skip_urls]
 
-        for item in fresh_items[:6]:
-            age = item_age_hours(item)
-            print(f"  [{age:.1f}h] {item['title'][:50]}", file=sys.stderr)
-            img_url, w, h = find_best_image(item["url"])
-            if img_url:
-                print(f"  ✓ 채택: {w}x{h} {img_url[:60]}", file=sys.stderr)
-                return {
-                    "title": item["title"],
-                    "url": item["url"],
-                    "direct_image_url": img_url,  # 직접 이미지 URL (CI에서 재다운로드)
-                    "source_name": source_name,
-                    "age_hours": age,
-                }
+        print(
+            f"  전체={len(items)} 아트={len(art_items)} 최신={len(fresh_items)} "
+            f"중복제외후={len(deduped)}건",
+            file=sys.stderr,
+        )
+        for it in deduped:
+            it["_source"] = source_name
+        all_fresh.extend(deduped)
+
+    if not all_fresh:
+        return None
+
+    # 최신 순 정렬 후 각 피드 순환 (같은 피드 연속 방지)
+    all_fresh.sort(key=lambda x: item_age_hours(x))
+
+    # 이미 처리 시도한 URL 추적 (이번 실행 내 추가 중복 방지)
+    tried: set[str] = set()
+    for item in all_fresh[:12]:
+        if item["url"] in tried:
+            continue
+        tried.add(item["url"])
+        age = item_age_hours(item)
+        source_name = item.pop("_source", "")
+        print(f"  [{age:.1f}h] {item['title'][:50]} ({source_name})", file=sys.stderr)
+        img_url, w, h = find_best_image(item["url"])
+        if img_url:
+            print(f"  ✓ 채택: {w}x{h} {img_url[:60]}", file=sys.stderr)
+            return {
+                "title": item["title"],
+                "url": item["url"],
+                "direct_image_url": img_url,
+                "source_name": source_name,
+                "age_hours": age,
+            }
 
     return None
 

@@ -40,8 +40,12 @@ def _is_direct_image_url(url: str) -> bool:
     # 확장자 없어도 CDN URL이면 HEAD로 content-type 확인
     try:
         import requests as _req
-        r = _req.head(url, timeout=8, allow_redirects=True,
-                      headers={"User-Agent": "Mozilla/5.0"})
+        _hdrs = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+        }
+        r = _req.head(url, timeout=8, allow_redirects=True, headers=_hdrs)
         return r.status_code == 200 and r.headers.get("content-type", "").startswith("image/")
     except Exception:
         return False

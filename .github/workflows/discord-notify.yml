@@ -81,6 +81,11 @@ jobs:
           fi
           while IFS= read -r meta; do
             [ -z "$meta" ] && continue
+            # _auto.json은 daily_auto.py가 직접 전송하므로 스킵
+            if [[ "$meta" == *_auto.json ]]; then
+              echo "::notice::skip (auto): $meta"
+              continue
+            fi
             if [ ! -f "$meta" ]; then
               echo "::warning::missing $meta, skip"
               continue
