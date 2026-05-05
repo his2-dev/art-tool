@@ -1,25 +1,25 @@
 {
-  "news_title": "부산시립미술관, 숏폼·릴스 등 '디지털 서브컬처' 개막 — 루프 랩 부산 2026",
+  "news_title": "부산이 통째로 미디어아트 플랫폼 — 2026 루프 랩 부산",
   "news_url": "https://biz.heraldcorp.com/article/10719359",
   "image_url": "https://biz.heraldcorp.com/article/10719359",
+  "image_path": "output/news/2026-05-05_루프랩부산_1.png",
   "headline1": "루프 랩 부산",
   "headline2": "미디어아트 개막",
   "source": "© 부산시립미술관",
-  "caption": "부산이 거대한 미디어아트 실험실로 변했습니다. 4월 23일부터 6월 28일까지, 부산 전역 35개 문화예술공간에서 25개국 130여 명의 작가가 참여하는 국제 미디어아트 페스티벌 '루프 랩 부산 2026'이 열립니다. AI·VR·AR을 아우르는 디지털 설치 작품들을 도시 곳곳에서 만날 수 있는 기회입니다.\n\n#루프랩부산 #미디어아트 #부산전시 #디지털아트 #아트매거진",
+  "caption": "부산이 통째로 미디어아트 플랫폼이 됐습니다. 25개국 130여 명의 작가가 부산 전역 35개 문화예술공간에 흩어져 AI·VR·AR 기반 작업을 펼치는 《2026 루프 랩 부산》—특정 큐레이팅 없이 각 기관이 독자적으로 구성하는 분산형 페스티벌이 6월 28일까지 이어집니다.\n\n#루프랩부산 #미디어아트 #부산전시 #디지털아트 #아트매거진",
   "published_at": "2026-05-05",
   "candidates": [
     {
-      "title": "루프 랩 부산 2026 — 국제 미디어아트 페스티벌 개막 (4/23~6/28)",
+      "title": "2026 루프 랩 부산 — 부산 전역 35개 공간 잇는 국제 미디어아트 페스티벌 (4/23~6/28)",
       "url": "https://biz.heraldcorp.com/article/10719359"
     },
     {
-      "title": "'서울사진축제' 5년 만에 재개 — 서울시립 사진미술관 《컴백홈》",
-      "url": "https://biz.heraldcorp.com/article/10712700"
+      "title": "베니스비엔날레 한국관 《해방공간: 요새와 둥지》 — 최고은·노혜리, 5/9 본전시 개막",
+      "url": "https://biz.heraldcorp.com/article/10698422"
     },
     {
-      "title": "데이미언 허스트, 국립현대미술관 아시아 첫 대규모 회고전 (3/20~6/28)",
-      "url": "https://www.news1.kr/life-culture/performance-exhibition/6030032"
+      "title": "NCT WISH 정규 1집 기념 전시 《LOVE WISH 'be inspired'》 — 을지로 20세기인쇄사무실 (~5/24)",
+      "url": "https://www.heraldmuse.com/article/10725422"
     }
-  ],
-  "image_path": "output/news/2026-05-05_루프랩부산_1.png"
+  ]
 }
