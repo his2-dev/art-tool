@@ -2,10 +2,8 @@ name: Daily News Auto
 
 on:
   schedule:
-    # KST 12:00 / 15:00 / 18:00 (UTC 03:00 / 06:00 / 09:00)
+    # KST 12:00 (UTC 03:00) — 하루 한 번
     - cron: '0 3 * * *'
-    - cron: '0 6 * * *'
-    - cron: '0 9 * * *'
   workflow_dispatch:
 
 permissions:
@@ -48,8 +46,8 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          # _auto.json 파일만 커밋 (PNG 제외 — discord-notify 중복 트리거 방지)
-          git add output/news/*_auto.json 2>/dev/null || true
+          # _auto*.json 파일만 커밋 (PNG 제외 — discord-notify 중복 트리거 방지)
+          git add output/news/*_auto*.json 2>/dev/null || true
           if git diff --cached --quiet; then
             echo "커밋할 변경 없음"
           else

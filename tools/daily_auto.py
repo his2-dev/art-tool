@@ -279,8 +279,8 @@ def find_best_image(article_url: str) -> tuple[str, int, int] | tuple[None, None
 
 # ── 후보 선별 ─────────────────────────────────────────────────────────────────
 
-def pick_candidate(max_age_hours: float = 36.0, skip_urls: set[str] | None = None):
-    """RSS에서 시의성 + 이미지 품질 통과한 첫 후보 반환.
+def pick_candidates(n: int = 3, max_age_hours: float = 36.0, skip_urls: set[str] | None = None) -> list[dict]:
+    """RSS에서 시의성 + 이미지 품질 통과한 상위 n개 후보 반환.
 
     max_age_hours 이내 기사 우선. 없으면 72h로 재시도.
     skip_urls: 이미 발행됐거나 이번 세션에 선택된 URL 집합 (중복 방지)
@@ -291,15 +291,21 @@ def pick_candidate(max_age_hours: float = 36.0, skip_urls: set[str] | None = Non
 
     for age_limit in [max_age_hours, 72.0]:
         print(f"\n[선별] 최대 {age_limit:.0f}시간 이내 기사 탐색", file=sys.stderr)
-        result = _pick_from_feeds(age_limit, skip_urls)
-        if result:
-            return result
+        results = _pick_from_feeds(age_limit, skip_urls, max_pick=n)
+        if results:
+            return results
     print("[오류] 모든 RSS 소진, 후보 없음", file=sys.stderr)
-    return None
+    return []
 
 
-def _pick_from_feeds(age_limit: float, skip_urls: set[str]):
-    # 모든 피드를 먼저 수집 후 섞어서 단일 피드 편중 방지
+def pick_candidate(max_age_hours: float = 36.0, skip_urls: set[str] | None = None):
+    """하위 호환용: 단일 후보 반환."""
+    results = pick_candidates(n=1, max_age_hours=max_age_hours, skip_urls=skip_urls)
+    return results[0] if results else None
+
+
+def _pick_from_feeds(age_limit: float, skip_urls: set[str], max_pick: int = 3) -> list[dict]:
+    # 모든 피드를 먼저 수집 후 최신 순 정렬 (단일 피드 편중 방지)
     all_fresh: list[dict] = []
     for feed_url, source_name in RSS_FEEDS:
         print(f"\n[RSS] {source_name} {feed_url}", file=sys.stderr)
@@ -328,14 +334,15 @@ def _pick_from_feeds(age_limit: float, skip_urls: set[str]):
         all_fresh.extend(deduped)
 
     if not all_fresh:
-        return None
+        return []
 
-    # 최신 순 정렬 후 각 피드 순환 (같은 피드 연속 방지)
+    # 최신 순 정렬
     all_fresh.sort(key=lambda x: item_age_hours(x))
 
-    # 이미 처리 시도한 URL 추적 (이번 실행 내 추가 중복 방지)
+    results: list[dict] = []
     tried: set[str] = set()
-    for item in all_fresh[:12]:
+    scan_limit = max(18, max_pick * 6)
+    for item in all_fresh[:scan_limit]:
         if item["url"] in tried:
             continue
         tried.add(item["url"])
@@ -344,16 +351,18 @@ def _pick_from_feeds(age_limit: float, skip_urls: set[str]):
         print(f"  [{age:.1f}h] {item['title'][:50]} ({source_name})", file=sys.stderr)
         img_url, w, h = find_best_image(item["url"])
         if img_url:
-            print(f"  ✓ 채택: {w}x{h} {img_url[:60]}", file=sys.stderr)
-            return {
+            print(f"  ✓ 채택 {len(results)+1}/{max_pick}: {w}x{h} {img_url[:60]}", file=sys.stderr)
+            results.append({
                 "title": item["title"],
                 "url": item["url"],
                 "direct_image_url": img_url,
                 "source_name": source_name,
                 "age_hours": age,
-            }
+            })
+            if len(results) >= max_pick:
+                break
 
-    return None
+    return results
 
 
 # ── 헤드라인 & 캡션 ──────────────────────────────────────────────────────────
@@ -390,37 +399,82 @@ def make_caption(title: str, source_name: str) -> str:
 # ── 메인 ─────────────────────────────────────────────────────────────────────
 
 def main() -> int:
-    picked = pick_candidate()
-    if not picked:
+    from tools.discord_sender import send_news_to_discord
+    from tools.news_poster import generate_news_poster
+
+    candidates = pick_candidates(n=3)
+    if not candidates:
+        print("[오류] 후보 없음 — Discord 전송 생략", file=sys.stderr)
         return 3
 
-    h1, h2 = make_headlines(picked["title"])
     today = date.today().isoformat()
+    os.makedirs("output/news", exist_ok=True)
 
-    meta = {
-        "news_title": picked["title"],
-        "news_url": picked["url"],
-        "image_url": picked["direct_image_url"],  # 검증된 직접 이미지 URL
-        "headline1": h1,
-        "headline2": h2,
-        "source": f"© {picked['source_name']}",
-        "caption": make_caption(picked["title"], picked["source_name"]),
-        "candidates": [{"title": picked["title"], "url": picked["url"]}],
-    }
+    all_titles = [{"title": c["title"], "url": c["url"]} for c in candidates]
+    success_count = 0
 
-    meta_path = f"output/news/{today}_auto.json"
-    os.makedirs(os.path.dirname(meta_path), exist_ok=True)
-    with open(meta_path, "w", encoding="utf-8") as f:
-        json.dump(meta, f, ensure_ascii=False, indent=2)
+    for i, picked in enumerate(candidates, 1):
+        h1, h2 = make_headlines(picked["title"])
+        source_str = f"© {picked['source_name']}"
+        caption = make_caption(picked["title"], picked["source_name"])
 
-    age = picked.get("age_hours", 0)
-    print(f"\n[완료] {picked['title']}", file=sys.stderr)
-    print(f"       헤드라인: {h1} / {h2}", file=sys.stderr)
-    print(f"       발행 경과: {age:.1f}시간", file=sys.stderr)
-    print(f"       이미지: {picked['direct_image_url'][:80]}", file=sys.stderr)
+        meta = {
+            "news_title": picked["title"],
+            "news_url": picked["url"],
+            "image_url": picked["direct_image_url"],
+            "headline1": h1,
+            "headline2": h2,
+            "source": source_str,
+            "caption": caption,
+            "candidates": all_titles,
+        }
 
-    sys.argv = ["discord_notify_ci.py", meta_path]
-    return notify_main()
+        meta_path = f"output/news/{today}_auto_{i}.json"
+        image_path = f"output/news/{today}_auto_{i}.png"
+
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
+
+        try:
+            generate_news_poster(
+                headline1=h1,
+                headline2=h2,
+                source=source_str,
+                image_url=picked["direct_image_url"] or None,
+                output_path=image_path,
+                scale=2,
+            )
+        except Exception as e:
+            print(f"[경고] 이미지 생성 실패 ({i}), 다크 배경 재시도: {e}", file=sys.stderr)
+            generate_news_poster(
+                headline1=h1,
+                headline2=h2,
+                source=source_str,
+                image_url=None,
+                output_path=image_path,
+                scale=2,
+            )
+
+        age = picked.get("age_hours", 0)
+        print(f"\n[발행 {i}/{len(candidates)}] {picked['title']}", file=sys.stderr)
+        print(f"       헤드라인: {h1} / {h2}", file=sys.stderr)
+        print(f"       경과: {age:.1f}시간 | 이미지: {image_path}", file=sys.stderr)
+
+        status = send_news_to_discord(
+            image_path=image_path,
+            news_title=picked["title"],
+            news_url=picked["url"],
+            headline1=h1,
+            headline2=h2,
+            source=source_str,
+            caption=caption,
+            candidates=all_titles,
+        )
+        if status == 200:
+            success_count += 1
+
+    print(f"\n[요약] {success_count}/{len(candidates)}개 Discord 전송 완료", file=sys.stderr)
+    return 0 if success_count > 0 else 2
 
 
 if __name__ == "__main__":
