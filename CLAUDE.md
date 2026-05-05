@@ -50,6 +50,7 @@
 | https://arthub.co.kr/sub06/board01_list.htm?Sub_No=2&page=1&key_type= | 전문 아트 매체 (보조 참고) |
 | WebSearch: `site:design.co.kr 2026` | 디자인프레스 최신 기사 (주제 참고) |
 | WebSearch: `site:eyesmag.com 2026 전시 아트` | 아이즈매거진 최신 기사 (주제 참고) |
+| WebSearch: `site:careet.net 2026 전시 아트` | 커릿 최신 기사 (주제 참고) |
 
 ### 후보 선별 기준
 
@@ -61,6 +62,7 @@
 | **artart.today** | MZ 타겟, 76만 팔로워, 트렌딩 아트 | WebSearch: `artart.today 최근 2026` |
 | **design.co.kr** | 디자인·아트 웹매거진, 전시 리뷰 중심 | WebSearch: `site:design.co.kr 2026 전시` |
 | **eyesmag.com** | 라이프스타일·아트·패션 웹매거진 | WebSearch: `site:eyesmag.com 2026 전시 아트` |
+| **careet.net** | 크리에이티브·아트·디자인 매거진, 트렌드 중심 | WebSearch: `site:careet.net 2026 전시 아트` |
 
 > 레퍼런스 채널은 뉴스 소스가 아니라 **주제 선정 나침반**으로만 사용. 이 채널들이 이미 다룬 소식이거나 다룰 법한 주제라면 우선 선택.
 
