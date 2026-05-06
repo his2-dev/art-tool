@@ -85,13 +85,31 @@ BADGE_RADIUS = 32
 
 
 def download_image(url: str) -> Image.Image:
-    """URL에서 이미지를 다운로드하여 PIL Image로 반환."""
+    """URL에서 이미지를 다운로드하여 PIL Image로 반환. 실패 시 None 반환."""
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
-    resp = requests.get(url, headers=headers, timeout=15)
-    resp.raise_for_status()
-    return Image.open(BytesIO(resp.content)).convert("RGB")
+    try:
+        resp = requests.get(url, headers=headers, timeout=15)
+        resp.raise_for_status()
+        return Image.open(BytesIO(resp.content)).convert("RGB")
+    except Exception as e:
+        print(f"[경고] 이미지 다운로드 실패 ({url[:60]}...): {e}")
+        return None
+
+
+def make_gradient_bg(canvas_w: int, canvas_h: int) -> Image.Image:
+    """이미지 없을 때 사용할 아트 느낌의 그라데이션 배경."""
+    bg = Image.new("RGB", (canvas_w, canvas_h))
+    draw = ImageDraw.Draw(bg)
+    # 상단 짙은 남색 → 하단 거의 검정
+    for y in range(canvas_h):
+        t = y / canvas_h
+        r = int(18 + (10 - 18) * t)
+        g = int(28 + (12 - 28) * t)
+        b = int(55 + (22 - 55) * t)
+        draw.line([(0, y), (canvas_w, y)], fill=(max(0, r), max(0, g), max(0, b)))
+    return bg
 
 
 def crop_cover(img: Image.Image, target_w: int, target_h: int) -> Image.Image:
@@ -273,9 +291,9 @@ def generate_news_poster(
     if image_path and os.path.exists(image_path):
         bg = Image.open(image_path).convert("RGB")
     elif image_url:
-        bg = download_image(image_url)
+        bg = download_image(image_url) or make_gradient_bg(canvas_w, canvas_h)
     else:
-        bg = Image.new("RGB", (canvas_w, canvas_h), (30, 30, 30))
+        bg = make_gradient_bg(canvas_w, canvas_h)
 
     canvas = crop_cover(bg, canvas_w, canvas_h)
     canvas = canvas.convert("RGBA")
