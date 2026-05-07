@@ -14,7 +14,7 @@
 
 ### 1. 환경 세팅
 ```bash
-export DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/1492898081841217748/vj4X1wToV4HD-rPqv7DyQ2Zxg3dUYlZWOiq6uft0OZw9SlLTJmtgrEwi29IwdqdSd4aM"
+export DISCORD_WEBHOOK_URL="$DISCORD_WEBHOOK_URL"  # 실제 값은 .env 또는 GitHub Secrets에서 관리 (절대 커밋 금지)
 pip install -r requirements.txt
 ```
 
