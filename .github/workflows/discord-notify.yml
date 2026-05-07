@@ -2,7 +2,7 @@ name: Discord Notify
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'claude/*']
     paths:
       - 'output/news/**.json'
   workflow_dispatch:

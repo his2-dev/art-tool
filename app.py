@@ -42,7 +42,7 @@ def _generate_and_show(h1, h2, source, image_url, uploaded_file, badge, scale, l
     if uploaded_file:
         suffix = os.path.splitext(uploaded_file.name)[1]
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-        tmp.write(uploaded_file.read())
+        tmp.write(uploaded_file.getvalue())
         tmp.close()
         tmp_image_path = tmp.name
 
@@ -154,18 +154,25 @@ with tab_auto:
             )
 
             if meta.get("image_url"):
-                st.image(meta["image_url"], caption="추출된 이미지", use_container_width=True)
+                st.image(meta["image_url"], caption="기사에서 추출된 이미지", use_container_width=True)
             auto_image_url = st.text_input(
                 "이미지 URL (수정 가능)",
                 value=meta.get("image_url", ""),
                 key="auto_img",
             )
 
+            st.markdown("**🖼️ 이 이미지가 마음에 안 들면 직접 교체**")
             auto_uploaded = st.file_uploader(
-                "또는 이미지 직접 업로드",
+                "교체할 이미지 업로드 (있으면 위 URL은 무시됩니다)",
                 type=["jpg", "jpeg", "png", "webp"],
                 key="auto_upload",
             )
+            if auto_uploaded:
+                st.image(
+                    auto_uploaded.getvalue(),
+                    caption="✅ 이 이미지로 생성됩니다 (URL 무시)",
+                    use_container_width=True,
+                )
 
             col1, col2, col3 = st.columns(3)
             with col1:
@@ -223,9 +230,19 @@ with tab_manual:
         source = st.text_input("출처 (선택)", placeholder="© 국립현대미술관", key="m_src")
 
         st.divider()
-        st.markdown("**배경 이미지** (둘 중 하나)")
+        st.markdown("**배경 이미지** (URL 또는 직접 업로드)")
         image_url = st.text_input("이미지 URL", placeholder="https://example.com/photo.jpg", key="m_url")
-        uploaded_file = st.file_uploader("또는 파일 업로드", type=["jpg", "jpeg", "png", "webp"], key="m_upload")
+        uploaded_file = st.file_uploader(
+            "또는 파일 업로드 (있으면 위 URL은 무시됩니다)",
+            type=["jpg", "jpeg", "png", "webp"],
+            key="m_upload",
+        )
+        if uploaded_file:
+            st.image(
+                uploaded_file.getvalue(),
+                caption="✅ 이 이미지로 생성됩니다 (URL 무시)",
+                use_container_width=True,
+            )
 
         st.divider()
         col1, col2, col3 = st.columns(3)
