@@ -38,3 +38,7 @@ Thumbs.db
 
 # Streamlit 로컬 설정
 .streamlit/secrets.toml
+
+# 웹훅·API 키 평문 포함 가능 메모 (절대 커밋 금지)
+*.secret.md
+*.keys.md
