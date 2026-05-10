@@ -13,7 +13,7 @@ jobs:
     steps:
       - name: Ping Streamlit app
         run: |
-          URL="https://artmag-news-tool.streamlit.app"
+          URL="https://art-tool-news.streamlit.app"
           HTTP_CODE=$(curl -sSL -o /dev/null -w "%{http_code}" --max-time 30 "$URL")
           echo "✅ Pinged $URL — HTTP $HTTP_CODE at $(date -u)"
           # 200/300 계열이면 정상, 그 외는 경고만 (실패시키지 않음)

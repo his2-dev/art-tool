@@ -162,12 +162,12 @@ python tools/news_poster.py \
 |------|------|
 | 로컬 실행 | `streamlit run app.py` → `localhost:8501` |
 | 팀원 접속 (같은 네트워크) | `http://192.168.0.6:8501` |
-| GitHub 레포 | `https://github.com/his2-dev/artmag-news-tool` |
-| Streamlit Cloud | 배포 시 `https://artmag-news-tool.streamlit.app` |
+| GitHub 레포 | `https://github.com/his2-dev/art-tool` |
+| Streamlit Cloud | 배포 시 `https://art-tool-news.streamlit.app` |
 | 기능 | 기사 URL 자동 파싱, 수동 입력, 로고 색상 선택(자동/흰색/검정), 2배 해상도 |
 
 ### Streamlit Cloud 배포 방법
-1. `share.streamlit.io` → GitHub 연결 → `his2-dev/artmag-news-tool` → `app.py` → Deploy
+1. `share.streamlit.io` → GitHub 연결 → `his2-dev/art-tool` → `app.py` → Deploy
 
 ---
 

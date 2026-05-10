@@ -14,7 +14,7 @@ try:
 except ImportError:
     pass
 
-APP_URL = "https://artmag-news-tool.streamlit.app"
+APP_URL = "https://art-tool-news.streamlit.app"
 
 
 def _get_webhook_url() -> str:
