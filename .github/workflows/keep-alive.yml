@@ -1,0 +1,22 @@
+name: Keep Streamlit App Awake
+
+on:
+  schedule:
+    # 6시간마다 (Streamlit 슬립 임계 12시간 안에 두 번 핑)
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Ping Streamlit app
+        run: |
+          URL="https://art-tool-news.streamlit.app"
+          HTTP_CODE=$(curl -sSL -o /dev/null -w "%{http_code}" --max-time 30 "$URL")
+          echo "✅ Pinged $URL — HTTP $HTTP_CODE at $(date -u)"
+          # 200/300 계열이면 정상, 그 외는 경고만 (실패시키지 않음)
+          if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 400 ]; then
+            echo "::warning::Unexpected status $HTTP_CODE — 앱이 슬립일 수 있음"
+          fi
