@@ -101,9 +101,13 @@ def _domain_name(url: str) -> str:
 
 
 def _best_og_image(soup: BeautifulSoup) -> str:
-    """og:image / og:image:secure_url 중 있는 것 반환."""
+    """og:image:secure_url → og:image 순으로 반환. property/name 속성 모두 확인."""
     for prop in ["og:image:secure_url", "og:image"]:
         tag = soup.find("meta", property=prop)
+        if tag and tag.get("content"):
+            return tag.get("content", "").strip()
+        # 일부 사이트는 property 대신 name 속성 사용
+        tag = soup.find("meta", attrs={"name": prop})
         if tag and tag.get("content"):
             return tag.get("content", "").strip()
     return ""
