@@ -68,10 +68,11 @@ def _resolve_image_url(image_url: str) -> str:
 
 
 def _safe_scale(image_url: str) -> float:
-    """og:image 실제 크기를 측정해 업스케일 없는 최대 scale 반환.
+    """og:image 원본 크기에 맞춰 **업스케일 없는** scale 반환.
 
-    scale=1 → 1080×1350, scale=2 → 2160×2700 (인스타 캔버스 기준 높이 1350)
-    원본 높이가 충분하면 scale=2, 부족하면 낮춰서 강제 확대 방지.
+    4:5 크롭 후 cropped_w == 1080*scale & cropped_h == 1350*scale 이 되는 최대 scale.
+    원본이 작으면 1.0 미만으로도 떨어져 강제 확대 자체를 회피한다.
+    Discord/Instagram/피그마는 표시할 때 자체 스케일링하므로 화질 손상 없이 깔끔.
     """
     if not image_url:
         return 1.0
@@ -85,12 +86,13 @@ def _safe_scale(image_url: str) -> float:
         resp = _req.get(image_url, headers=hdrs, timeout=12, stream=True)
         resp.raise_for_status()
         img = _Image.open(BytesIO(resp.content))
-        _, h = img.size
-        # 높이 기준 안전 scale (1350×scale = target 높이)
-        scale = min(2.0, h / 1350.0)
-        result = max(1.0, scale)
-        print(f"[auto-scale] 원본 높이={h}px → scale={result:.2f}")
-        return result
+        w, h = img.size
+        # 4:5 크롭 가정: 두 변 중 작은 쪽에 맞춘 최대 scale (= 업스케일 없음)
+        scale = min(w / 1080.0, h / 1350.0)
+        # 텍스트 가독성 최소 한도 (324×405, 헤드라인 폰트 ~29px) ~ 최대 2배까지
+        bounded = max(0.3, min(2.0, scale))
+        print(f"[auto-scale] 원본={w}×{h}px → 무업스케일 scale={scale:.2f} → 적용={bounded:.2f}")
+        return bounded
     except Exception as e:
         print(f"[auto-scale] 크기 감지 실패, scale=1.0 사용: {e}", file=sys.stderr)
         return 1.0
