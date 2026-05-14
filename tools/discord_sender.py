@@ -14,7 +14,9 @@ try:
 except ImportError:
     pass
 
-APP_URL = "https://artmag-news-tool.streamlit.app"
+# 썸네일 편집기(Streamlit) URL.
+# 환경변수 ARTMAG_APP_URL 로 덮어쓰기 가능. 빈 값이면 Discord embed에서 링크 필드 생략.
+APP_URL = os.environ.get("ARTMAG_APP_URL", "").strip()
 
 
 def _get_webhook_url() -> str:
@@ -91,11 +93,12 @@ def send_news_to_discord(
             "inline": False,
         })
 
-    embed["fields"].append({
-        "name": "🔧 직접 만들기",
-        "value": f"[썸네일 생성기 열기]({APP_URL})",
-        "inline": False,
-    })
+    if APP_URL:
+        embed["fields"].append({
+            "name": "🔧 직접 만들기",
+            "value": f"[썸네일 생성기 열기]({APP_URL})",
+            "inline": False,
+        })
 
     payload = {"embeds": [embed]}
 
@@ -112,13 +115,15 @@ def send_news_to_discord(
     else:
         print(f"[경고] Discord embed 실패 ({r.status_code}), 텍스트로 재시도")
         # fallback: 텍스트만
-        fallback = (
-            f"🎨 오늘의 뉴스: {news_title}\n"
-            f"📝 헤드라인: {headline1} / {headline2}\n"
-            f"🔗 기사: {news_url}\n"
-            f"🖊️ 캡션: {caption[:500]}\n"
-            f"🔧 직접 만들기: {APP_URL}"
-        )
+        fallback_lines = [
+            f"🎨 오늘의 뉴스: {news_title}",
+            f"📝 헤드라인: {headline1} / {headline2}",
+            f"🔗 기사: {news_url}",
+            f"🖊️ 캡션: {caption[:500]}",
+        ]
+        if APP_URL:
+            fallback_lines.append(f"🔧 직접 만들기: {APP_URL}")
+        fallback = "\n".join(fallback_lines)
         requests.post(_get_webhook_url(), json={"content": fallback})
 
     return r.status_code
