@@ -85,10 +85,27 @@ BADGE_RADIUS = 32
 
 
 def download_image(url: str) -> Image.Image:
-    """URL에서 이미지를 다운로드하여 PIL Image로 반환."""
+    """URL에서 이미지를 다운로드하여 PIL Image로 반환.
+
+    curl_cffi(Chrome TLS 핑거프린트) 우선, 실패 시 requests fallback.
+    한국 CDN 일부가 JA3 기반 봇 차단을 적용하므로 우회 경로 필요.
+    """
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+        "Referer": "https://www.google.com/",
     }
+    try:
+        from curl_cffi import requests as _creq  # type: ignore
+        r = _creq.get(url, headers=headers, timeout=15,
+                      allow_redirects=True, impersonate="chrome120")
+        if r.status_code < 400:
+            return Image.open(BytesIO(r.content)).convert("RGB")
+    except ImportError:
+        pass
+    except Exception:
+        pass
     resp = requests.get(url, headers=headers, timeout=15)
     resp.raise_for_status()
     return Image.open(BytesIO(resp.content)).convert("RGB")

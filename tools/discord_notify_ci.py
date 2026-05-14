@@ -38,14 +38,22 @@ def _is_direct_image_url(url: str) -> bool:
     path = urlparse(url).path.lower()
     if path.endswith((".jpg", ".jpeg", ".png", ".webp", ".gif")):
         return True
-    # 확장자 없어도 CDN URL이면 HEAD로 content-type 확인
+    # 확장자 없어도 CDN URL이면 HEAD로 content-type 확인 (curl_cffi 우선)
+    _hdrs = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+    }
+    try:
+        from curl_cffi import requests as _creq  # type: ignore
+        r = _creq.head(url, timeout=8, allow_redirects=True,
+                       headers=_hdrs, impersonate="chrome120")
+        if r.status_code == 200:
+            return r.headers.get("content-type", "").startswith("image/")
+    except Exception:
+        pass
     try:
         import requests as _req
-        _hdrs = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                          "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
-        }
         r = _req.head(url, timeout=8, allow_redirects=True, headers=_hdrs)
         return r.status_code == 200 and r.headers.get("content-type", "").startswith("image/")
     except Exception:
@@ -77,15 +85,26 @@ def _safe_scale(image_url: str) -> float:
     if not image_url:
         return 1.0
     try:
-        import requests as _req
         from PIL import Image as _Image
         hdrs = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                           "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         }
-        resp = _req.get(image_url, headers=hdrs, timeout=12, stream=True)
-        resp.raise_for_status()
-        img = _Image.open(BytesIO(resp.content))
+        content = None
+        try:
+            from curl_cffi import requests as _creq  # type: ignore
+            r = _creq.get(image_url, headers=hdrs, timeout=12,
+                          allow_redirects=True, impersonate="chrome120")
+            if r.status_code < 400:
+                content = r.content
+        except Exception:
+            pass
+        if content is None:
+            import requests as _req
+            resp = _req.get(image_url, headers=hdrs, timeout=12, stream=True)
+            resp.raise_for_status()
+            content = resp.content
+        img = _Image.open(BytesIO(content))
         w, h = img.size
         # 4:5 크롭 가정: 두 변 중 작은 쪽에 맞춘 최대 scale (= 업스케일 없음)
         scale = min(w / 1080.0, h / 1350.0)

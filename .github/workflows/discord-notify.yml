@@ -35,7 +35,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install requests==2.32.3 beautifulsoup4==4.12.3 Pillow==10.4.0
+        run: pip install requests==2.32.3 beautifulsoup4==4.12.3 Pillow==10.4.0 'curl_cffi>=0.7.0'
 
       - name: Collect meta files to send
         id: find

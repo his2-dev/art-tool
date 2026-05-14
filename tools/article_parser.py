@@ -9,6 +9,31 @@ from urllib.parse import urlparse
 import requests
 from bs4 import BeautifulSoup
 
+# curl_cffi: Chrome TLS 핑거프린트로 위장 → Cloudflare/JA3 기반 봇 차단 우회
+# 일부 한국 뉴스 사이트(news1.kr, heraldcorp.com 등)는 Python requests의
+# TLS 시그니처를 보고 403을 반환. curl_cffi가 있으면 우선 사용.
+try:
+    from curl_cffi import requests as _curl_requests  # type: ignore
+    _HAS_CURL_CFFI = True
+except ImportError:
+    _curl_requests = None
+    _HAS_CURL_CFFI = False
+
+
+def _fetch_html(url: str, headers: dict, timeout: int = 15):
+    """curl_cffi(Chrome 핑거프린트) 우선, requests fallback."""
+    if _HAS_CURL_CFFI:
+        try:
+            r = _curl_requests.get(
+                url, headers=headers, timeout=timeout,
+                allow_redirects=True, impersonate="chrome120",
+            )
+            if r.status_code < 400:
+                return r
+        except Exception:
+            pass
+    return requests.get(url, headers=headers, timeout=timeout, allow_redirects=True)
+
 
 def parse_article(url: str) -> dict:
     """기사 URL에서 제목, 이미지, 출처를 추출합니다.
@@ -39,10 +64,13 @@ def parse_article(url: str) -> dict:
         "Sec-Fetch-User": "?1",
         "Cache-Control": "max-age=0",
     }
-    resp = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
+    resp = _fetch_html(url, headers, timeout=15)
     resp.raise_for_status()
     # 인코딩 자동 감지 보정 (한국 뉴스 사이트 대응)
-    resp.encoding = resp.apparent_encoding
+    try:
+        resp.encoding = resp.apparent_encoding
+    except AttributeError:
+        pass  # curl_cffi response may not have apparent_encoding
     soup = BeautifulSoup(resp.text, "html.parser")
 
     def og(prop: str) -> str:
