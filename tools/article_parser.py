@@ -56,7 +56,7 @@ def parse_article(url: str) -> dict:
         return ""
 
     title = og("title") or _get_title(soup)
-    image_url = og("image") or _get_first_image(soup)
+    image_url = _best_og_image(soup) or _get_best_image(soup)
     site_name = og("site_name") or _domain_name(url)
     description = (
         og("description")
@@ -100,25 +100,86 @@ def _domain_name(url: str) -> str:
     return domain
 
 
-def _get_first_image(soup: BeautifulSoup) -> str:
-    """og:image가 없을 때 본문 첫 번째 큰 이미지 추출."""
-    # twitter:image 시도
-    tag = soup.find("meta", attrs={"name": "twitter:image"})
-    if tag and tag.get("content"):
-        return tag["content"].strip()
-    # 본문 img 태그
+def _best_og_image(soup: BeautifulSoup) -> str:
+    """og:image / og:image:secure_url 중 있는 것 반환."""
+    for prop in ["og:image:secure_url", "og:image"]:
+        tag = soup.find("meta", property=prop)
+        if tag and tag.get("content"):
+            return tag.get("content", "").strip()
+    return ""
+
+
+def _parse_srcset_largest(srcset: str) -> tuple:
+    """srcset 문자열에서 가장 큰 너비의 (url, width) 반환."""
+    best_url, best_w = "", 0
+    for entry in srcset.split(","):
+        parts = entry.strip().split()
+        if not parts:
+            continue
+        url = parts[0]
+        w = 0
+        if len(parts) > 1:
+            desc = parts[1]
+            try:
+                if desc.endswith("w"):
+                    w = int(desc[:-1])
+                elif desc.endswith("x"):
+                    w = int(float(desc[:-1]) * 1000)
+            except ValueError:
+                pass
+        if w > best_w:
+            best_w, best_url = w, url
+    return best_url, best_w
+
+
+_IMG_SKIP = {"logo", "icon", "badge", "avatar", "btn", "spinner", "blank"}
+
+
+def _get_best_image(soup: BeautifulSoup) -> str:
+    """og:image가 없을 때 본문에서 가장 큰 이미지 URL 반환."""
+    candidates: list[tuple[int, str]] = []
+
+    # 1. twitter:image 메타태그 (높은 우선순위 가중치)
+    for name in ("twitter:image", "twitter:image:src"):
+        tag = soup.find("meta", attrs={"name": name})
+        if tag and tag.get("content"):
+            candidates.append((99999, tag["content"].strip()))
+            break
+
+    # 2. 본문 img 태그 — srcset 우선, fallback src
     for img in soup.find_all("img"):
-        src = img.get("src", "")
+        srcset = img.get("data-srcset") or img.get("srcset", "")
+        src = img.get("data-src") or img.get("src", "")
+
+        # srcset에서 최대 너비 URL 추출
+        if srcset:
+            best_url, best_w = _parse_srcset_largest(srcset)
+            if best_url and not any(s in best_url.lower() for s in _IMG_SKIP):
+                candidates.append((best_w, best_url))
+
         if not src:
             continue
-        # 작은 아이콘 제외
-        w = img.get("width", "")
-        if w and w.isdigit() and int(w) < 200:
+        if any(s in src.lower() for s in _IMG_SKIP):
             continue
-        if any(skip in src.lower() for skip in ["logo", "icon", "badge", "avatar", "btn"]):
+
+        # width 속성으로 크기 추정
+        raw_w = img.get("width") or img.get("data-width") or ""
+        try:
+            width = int(str(raw_w).rstrip("px")) if raw_w else 0
+        except ValueError:
+            width = 0
+
+        if 0 < width < 200:
             continue
-        return src
-    return ""
+
+        candidates.append((width, src))
+
+    if not candidates:
+        return ""
+
+    # 너비 내림차순 정렬 후 최대 크기 반환
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    return candidates[0][1]
 
 
 def _find_image_credit(soup: BeautifulSoup) -> str:

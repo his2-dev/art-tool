@@ -8,8 +8,18 @@
   "caption": "세계 명품 대통령 아르노 회장이 3년 만에 한국을 찾았어요. 이유는 단순해요 — 신세계 더 리저브에 자리 잡은 루이비통 비저너리 저니 서울, 세계 최대 규모의 LV 하우스를 직접 챙기러. 브랜드 역사와 문화·아트가 6층에 걸쳐 펼쳐지는 공간, 이제 서울에 있어요. #루이비통 #LVMH #럭셔리아트 #패션아트 #아트매거진",
   "published_at": "2026-05-14",
   "candidates": [
-    {"title": "붓터치까지 생생…서울서 만나는 '에르미타주' 명화", "url": "https://biz.heraldcorp.com/article/10730072"},
-    {"title": "아르노 LVMH 회장, 3년 만에 방한…딸 델핀과 신세계 본점 찾았다", "url": "https://www.news1.kr/industry/distribution/6162744"},
-    {"title": "움직인다는 건 살아 있다는 증거…홍승혜의 이동의 여정", "url": "https://biz.heraldcorp.com/article/10725434"}
-  ]
+    {
+      "title": "붓터치까지 생생…서울서 만나는 '에르미타주' 명화",
+      "url": "https://biz.heraldcorp.com/article/10730072"
+    },
+    {
+      "title": "아르노 LVMH 회장, 3년 만에 방한…딸 델핀과 신세계 본점 찾았다",
+      "url": "https://www.news1.kr/industry/distribution/6162744"
+    },
+    {
+      "title": "움직인다는 건 살아 있다는 증거…홍승혜의 이동의 여정",
+      "url": "https://biz.heraldcorp.com/article/10725434"
+    }
+  ],
+  "image_quality": "v2"
 }

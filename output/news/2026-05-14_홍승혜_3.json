@@ -8,8 +8,18 @@
   "caption": "픽셀에서 시작해 춤추는 도형들이 신체와 공간까지 확장되는 느낌, 홍승혜 작가의 작업이 딱 그래요. 3년 만에 국제갤러리에서 열리는 개인전이자 부산점 첫 전시라 더 특별한데, 기하학적 이미지들이 스크린 밖으로 나와서 조각과 가구까지 됩니다. 6월 14일까지 국제갤러리 부산에서. #홍승혜 #국제갤러리 #부산전시 #디지털아트 #아트매거진",
   "published_at": "2026-05-14",
   "candidates": [
-    {"title": "붓터치까지 생생…서울서 만나는 '에르미타주' 명화", "url": "https://biz.heraldcorp.com/article/10730072"},
-    {"title": "아르노 LVMH 회장, 3년 만에 방한…딸 델핀과 신세계 본점 찾았다", "url": "https://www.news1.kr/industry/distribution/6162744"},
-    {"title": "움직인다는 건 살아 있다는 증거…홍승혜의 이동의 여정", "url": "https://biz.heraldcorp.com/article/10725434"}
-  ]
+    {
+      "title": "붓터치까지 생생…서울서 만나는 '에르미타주' 명화",
+      "url": "https://biz.heraldcorp.com/article/10730072"
+    },
+    {
+      "title": "아르노 LVMH 회장, 3년 만에 방한…딸 델핀과 신세계 본점 찾았다",
+      "url": "https://www.news1.kr/industry/distribution/6162744"
+    },
+    {
+      "title": "움직인다는 건 살아 있다는 증거…홍승혜의 이동의 여정",
+      "url": "https://biz.heraldcorp.com/article/10725434"
+    }
+  ],
+  "image_quality": "v2"
 }

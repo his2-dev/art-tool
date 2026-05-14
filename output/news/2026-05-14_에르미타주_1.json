@@ -8,8 +8,18 @@
   "caption": "세계 3대 박물관 에르미타주가 처음으로 디지털 전시를 해외로 가져왔는데, 그 첫 번째 도시가 서울이에요. 러시아 겨울궁전을 초대형 미디어 파사드로 재현한 공간 — 실물 명화 대신 빛과 데이터로 보는 에르미타주라는 게 오히려 더 설레지 않나요? 서울 상암동 문화비축기지에서 7월 30일까지 만날 수 있어요. #에르미타주 #미디어아트 #문화비축기지 #서울전시 #아트매거진",
   "published_at": "2026-05-14",
   "candidates": [
-    {"title": "붓터치까지 생생…서울서 만나는 '에르미타주' 명화", "url": "https://biz.heraldcorp.com/article/10730072"},
-    {"title": "아르노 LVMH 회장, 3년 만에 방한…딸 델핀과 신세계 본점 찾았다", "url": "https://www.news1.kr/industry/distribution/6162744"},
-    {"title": "움직인다는 건 살아 있다는 증거…홍승혜의 이동의 여정", "url": "https://biz.heraldcorp.com/article/10725434"}
-  ]
+    {
+      "title": "붓터치까지 생생…서울서 만나는 '에르미타주' 명화",
+      "url": "https://biz.heraldcorp.com/article/10730072"
+    },
+    {
+      "title": "아르노 LVMH 회장, 3년 만에 방한…딸 델핀과 신세계 본점 찾았다",
+      "url": "https://www.news1.kr/industry/distribution/6162744"
+    },
+    {
+      "title": "움직인다는 건 살아 있다는 증거…홍승혜의 이동의 여정",
+      "url": "https://biz.heraldcorp.com/article/10725434"
+    }
+  ],
+  "image_quality": "v2"
 }

@@ -23,6 +23,7 @@ import argparse
 import json
 import os
 import sys
+from io import BytesIO
 from urllib.parse import urlparse
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -66,14 +67,44 @@ def _resolve_image_url(image_url: str) -> str:
         return ""
 
 
+def _safe_scale(image_url: str) -> float:
+    """og:image 실제 크기를 측정해 업스케일 없는 최대 scale 반환.
+
+    scale=1 → 1080×1350, scale=2 → 2160×2700 (인스타 캔버스 기준 높이 1350)
+    원본 높이가 충분하면 scale=2, 부족하면 낮춰서 강제 확대 방지.
+    """
+    if not image_url:
+        return 1.0
+    try:
+        import requests as _req
+        from PIL import Image as _Image
+        hdrs = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        }
+        resp = _req.get(image_url, headers=hdrs, timeout=12, stream=True)
+        resp.raise_for_status()
+        img = _Image.open(BytesIO(resp.content))
+        _, h = img.size
+        # 높이 기준 안전 scale (1350×scale = target 높이)
+        scale = min(2.0, h / 1350.0)
+        result = max(1.0, scale)
+        print(f"[auto-scale] 원본 높이={h}px → scale={result:.2f}")
+        return result
+    except Exception as e:
+        print(f"[auto-scale] 크기 감지 실패, scale=1.0 사용: {e}", file=sys.stderr)
+        return 1.0
+
+
 def _generate(meta: dict, image_path: str, image_url: str) -> None:
+    scale = _safe_scale(image_url) if image_url else 1.0
     generate_news_poster(
         headline1=meta.get("headline1", ""),
         headline2=meta.get("headline2", ""),
         source=meta.get("source", ""),
         image_url=image_url or None,
         output_path=image_path,
-        scale=2,
+        scale=scale,
     )
 
 
