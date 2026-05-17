@@ -273,7 +273,11 @@ def generate_news_poster(
     if image_path and os.path.exists(image_path):
         bg = Image.open(image_path).convert("RGB")
     elif image_url:
-        bg = download_image(image_url)
+        try:
+            bg = download_image(image_url)
+        except Exception as e:
+            print(f"[경고] 이미지 다운로드 실패 ({e}) — 어두운 배경으로 폴백. GitHub Actions CI가 og:image 복원 예정.")
+            bg = Image.new("RGB", (canvas_w, canvas_h), (30, 30, 30))
     else:
         bg = Image.new("RGB", (canvas_w, canvas_h), (30, 30, 30))
 
