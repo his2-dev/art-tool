@@ -168,6 +168,6 @@ python tools/news_poster.py \
 | 태스크 ID | `daily-news-thumbnail` |
 | 실행 시간 | 매일 12:00 KST |
 | 동작 | 뉴스 3건 선별 → 이미지 생성 → 커밋·푸시 → Discord 전송 |
-| 프롬프트 | `notes/scheduled_prompt_v2_triple.md` |
+| 파이프라인 | `.claude/skills/daily-news/` (daily-news 스킬) |
 | 폴백 | GitHub Actions `daily-news.yml` 13:00 KST (당일 발행 있으면 스킵) |
 | 관리 | Claude Code 사이드바 → Scheduled |
