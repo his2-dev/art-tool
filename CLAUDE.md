@@ -41,7 +41,7 @@ MZ가 저장·공유하고 싶은 비주얼, 니치하지만 힙한 취향까지
 4. `image_url`은 아래 규칙의 허용 도메인으로 확정 후 진행
 
 ### 자동 모드 (스케줄 — 매일 12:00 KST)
-사용자 확인 없이 3건 전체 자동 진행. 프롬프트: `notes/scheduled_prompt_v2_triple.md`
+사용자 확인 없이 3건 전체 자동 진행. 파이프라인: `.claude/skills/daily-news/` (daily-news 스킬)
 
 ### 폴백 자동 모드 (GitHub Actions — 매일 13:00 KST)
 `.github/workflows/daily-news.yml` + `tools/daily_auto.py`.
@@ -62,7 +62,7 @@ MZ가 저장·공유하고 싶은 비주얼, 니치하지만 힙한 취향까지
 | Streamlit 웹앱 | `app.py` |
 | 로고/폰트 에셋 | `tools/assets/` |
 | 생성된 뉴스 이미지 | `output/news/` |
-| 스케줄 프롬프트 | `notes/scheduled_prompt_v2_triple.md` |
+| 발행 파이프라인 스킬 | `.claude/skills/daily-news/` (SKILL.md + curation/image-rules/headline-caption) |
 
 ---
 
