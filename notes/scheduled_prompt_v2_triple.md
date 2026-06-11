@@ -9,7 +9,9 @@
 오늘의 문화예술 뉴스 3건 선별 → 썸네일 이미지 3개 생성 → 커밋 푸시 → Discord 전송까지 자동 진행.
 **사용자 확인 단계 없음. 끝까지 혼자 진행.**
 
-**편집 기준점**: artart.today·b.framemag 같은 아트 인스타 매거진이 "오늘 올릴 법한" 소식만 고른다.
+**편집 기준점**: artart.today·cultureart4u(널 위한 문화예술)·artinculture(아트인컬처)·lingrongdang(링롱댕)·
+b.framemag 같은 아트 인스타 매거진이 "오늘 올릴 법한" 소식만 고른다.
+공통 감성: 작품/전시 뒤의 **이야기**가 되는 소식, MZ가 저장·공유하고 싶은 비주얼, 니치하지만 힙한 취향.
 보도자료 받아쓰기, 지역 행사 알림, 인터뷰·칼럼 연재는 우리 콘텐츠가 아니다.
 
 ---
@@ -90,6 +92,8 @@ python3 -c "from datetime import date; d=date.today(); print(f'{d.year}년 {d.mo
 
 ```
 artart.today 2026 최근
+널 위한 문화예술 cultureart4u 2026 최근
+아트인컬처 2026 전시
 b.framemag 2026 최근
 site:design.co.kr 2026 전시
 site:eyesmag.com 2026 아트

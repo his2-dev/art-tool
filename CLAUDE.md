@@ -10,8 +10,12 @@
 - 계정 크레딧: `에디터 | 큐`
 
 ## 편집 방향 (큐레이션 기준)
-레퍼런스 채널 (`artart.today`, `b.framemag`, `design.co.kr`, `eyesmag.com`, `careet.net`)이
-"올릴 법한" 소식만 다룬다. 우선순위:
+레퍼런스 채널이 "올릴 법한" 소식만 다룬다:
+`artart.today`, `cultureart4u`(널 위한 문화예술), `artinculture`(아트인컬처), `lingrongdang`(링롱댕),
+`b.framemag`, `design.co.kr`, `eyesmag.com`, `careet.net`
+
+이 채널들의 공통 감성: **"이게 왜 재밌는지" 이야기가 되는 동시대 미술 소식** — 작품/전시 뒤의 스토리,
+MZ가 저장·공유하고 싶은 비주얼, 니치하지만 힙한 취향까지. 우선순위:
 
 1. **타이밍** — 이번 주 개막·발표·이슈
 2. **화제성** — SNS 반응, 셀럽 연관, 팝컬처 접점
