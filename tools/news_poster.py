@@ -23,6 +23,10 @@ from datetime import date
 import requests
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
 # ── 상수 ──────────────────────────────────────────────
 CANVAS_W, CANVAS_H = 1080, 1350
 
@@ -69,6 +73,10 @@ LOGO_LUMA_THRESHOLD = 165
 SHADOW_START_RATIO = 0.4  # 캔버스 40% 지점부터 시작
 SHADOW_MAX_ALPHA = 180
 
+# 업스케일 배율이 이 값을 넘으면 선명 보정 대신 블러 배경 처리
+# (저화질 원본을 억지로 키우면 픽셀·노이즈가 두드러짐 → 깔끔한 블러가 낫다)
+LOW_RES_BLUR_THRESHOLD = 2.4
+
 HEADLINE1_Y = 935
 HEADLINE2_Y = 1055
 
@@ -85,17 +93,27 @@ BADGE_RADIUS = 32
 
 
 def download_image(url: str) -> Image.Image:
-    """URL에서 이미지를 다운로드하여 PIL Image로 반환."""
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    }
-    resp = requests.get(url, headers=headers, timeout=15)
-    resp.raise_for_status()
+    """URL에서 이미지를 다운로드하여 PIL Image로 반환.
+    curl_cffi가 있으면 Chrome 핑거프린트로 우회 (한국 뉴스 사이트 403 대응)."""
+    try:
+        from tools.article_parser import http_get
+        resp = http_get(url, timeout=15)
+    except ImportError:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }
+        resp = requests.get(url, headers=headers, timeout=15)
+        resp.raise_for_status()
     return Image.open(BytesIO(resp.content)).convert("RGB")
 
 
 def crop_cover(img: Image.Image, target_w: int, target_h: int) -> Image.Image:
-    """이미지를 target 비율로 center crop 후 resize."""
+    """이미지를 target 비율로 crop 후 resize.
+
+    - 가로 초과분은 중앙 crop, 세로 초과분은 상단 1/3 지점 기준 crop
+      (인물·작품이 보통 상단에 위치)
+    - 업스케일 배율이 클 때는 2단계 리사이즈 + 언샤프로 계단 현상 완화
+    """
     src_w, src_h = img.size
     target_ratio = target_w / target_h
     src_ratio = src_w / src_h
@@ -106,12 +124,31 @@ def crop_cover(img: Image.Image, target_w: int, target_h: int) -> Image.Image:
         img = img.crop((left, 0, left + new_w, src_h))
     else:
         new_h = int(src_w / target_ratio)
-        top = (src_h - new_h) // 2
+        top = int((src_h - new_h) * 0.33)
         img = img.crop((0, top, src_w, top + new_h))
 
+    crop_w, crop_h = img.size
+    upscale = target_w / max(crop_w, 1)
+
+    if upscale > LOW_RES_BLUR_THRESHOLD:
+        # 원본이 너무 작아 선명한 업스케일이 불가능 → 픽셀이 두드러지는 것보다
+        # 의도적인 블러 배경이 깔끔하게 보임 (텍스트·로고는 이후 선명하게 올라감)
+        resized = img.resize((target_w, target_h), Image.LANCZOS)
+        radius = max(6, int(target_w / 140))
+        resized = resized.filter(ImageFilter.GaussianBlur(radius=radius))
+        print(f"[화질] 업스케일 {upscale:.1f}x — 저화질 보정으로 블러 배경 적용 (radius={radius})")
+        return resized
+
+    if upscale > 1.75:
+        # 2단계 업스케일: 중간 크기를 거치면 보간 품질이 좋아짐
+        mid_w = int(crop_w * (upscale ** 0.5))
+        mid_h = int(crop_h * (upscale ** 0.5))
+        img = img.resize((mid_w, mid_h), Image.LANCZOS)
+        img = img.filter(ImageFilter.UnsharpMask(radius=1.2, percent=80, threshold=3))
+
     resized = img.resize((target_w, target_h), Image.LANCZOS)
-    if target_w > src_w or target_h > src_h:
-        resized = resized.filter(ImageFilter.UnsharpMask(radius=1.8, percent=130, threshold=3))
+    if upscale > 1.05:
+        resized = resized.filter(ImageFilter.UnsharpMask(radius=1.8, percent=110, threshold=3))
     return resized
 
 
@@ -252,7 +289,24 @@ def generate_news_poster(
     if scale < 1:
         raise ValueError("scale 은 1 이상이어야 합니다.")
 
+    # 1. 배경 이미지 (스케일 결정 전에 로드 — 원본 해상도에 맞춰 출력 배율 제한)
+    bg = None
+    if image_path and os.path.exists(image_path):
+        bg = Image.open(image_path).convert("RGB")
+    elif image_url:
+        bg = download_image(image_url)
+
     scale_value = float(scale)
+    if bg is not None:
+        # 원본에서 캔버스 비율로 crop했을 때 쓸 수 있는 가로폭 기준으로
+        # 의미 없는 과업스케일 방지 (예: 1200x630 원본을 2160x2700으로 4배 확대)
+        src_w, src_h = bg.size
+        usable_w = min(src_w, src_h * CANVAS_W / CANVAS_H)
+        supported_scale = max(1.0, usable_w / CANVAS_W)
+        if supported_scale < scale_value:
+            scale_value = round(supported_scale, 2)
+            print(f"[배율] 원본 {src_w}x{src_h} → 출력 배율 {scale_value}x로 제한 (과업스케일 방지)")
+
     canvas_w = int(round(CANVAS_W * scale_value))
     canvas_h = int(round(CANVAS_H * scale_value))
     logo_pos = (int(round(LOGO_POS[0] * scale_value)), int(round(LOGO_POS[1] * scale_value)))
@@ -269,12 +323,7 @@ def generate_news_poster(
     badge_text_y = int(round(BADGE_TEXT_Y * scale_value))
     badge_radius = int(round(BADGE_RADIUS * scale_value))
 
-    # 1. 배경 이미지
-    if image_path and os.path.exists(image_path):
-        bg = Image.open(image_path).convert("RGB")
-    elif image_url:
-        bg = download_image(image_url)
-    else:
+    if bg is None:
         bg = Image.new("RGB", (canvas_w, canvas_h), (30, 30, 30))
 
     canvas = crop_cover(bg, canvas_w, canvas_h)

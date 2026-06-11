@@ -4,10 +4,43 @@ AI 없이 메타태그/캡션/본문 패턴을 조합해 기사 정보를 정리
 """
 
 import re
+import sys
 from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
+
+DEFAULT_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+}
+
+
+def http_get(url: str, timeout: int = 15):
+    """GET 요청. curl_cffi가 설치돼 있으면 Chrome TLS 핑거프린트로 우회 시도 후,
+    실패하면 일반 requests로 폴백. 한국 뉴스 사이트의 봇 차단(403) 대응용."""
+    try:
+        from curl_cffi import requests as cf_requests
+        r = cf_requests.get(
+            url,
+            impersonate="chrome120",
+            timeout=timeout,
+            allow_redirects=True,
+            headers={"Accept-Language": DEFAULT_HEADERS["Accept-Language"]},
+        )
+        if r.status_code == 200:
+            return r
+    except ImportError:
+        pass
+    except Exception:
+        pass
+    r = requests.get(url, headers=DEFAULT_HEADERS, timeout=timeout, allow_redirects=True)
+    r.raise_for_status()
+    return r
 
 
 def parse_article(url: str) -> dict:
@@ -24,26 +57,9 @@ def parse_article(url: str) -> dict:
             "suggested_headline2": str,  # 추천 헤드라인 2줄
         }
     """
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                      "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Accept-Encoding": "gzip, deflate, br",
-        "DNT": "1",
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1",
-        "Sec-Fetch-Dest": "document",
-        "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "none",
-        "Sec-Fetch-User": "?1",
-        "Cache-Control": "max-age=0",
-    }
-    resp = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
-    resp.raise_for_status()
-    # 인코딩 자동 감지 보정 (한국 뉴스 사이트 대응)
-    resp.encoding = resp.apparent_encoding
-    soup = BeautifulSoup(resp.text, "html.parser")
+    resp = http_get(url, timeout=15)
+    # bytes로 넘겨 BeautifulSoup이 meta charset 기반 인코딩 자동 감지 (한국 뉴스 사이트 대응)
+    soup = BeautifulSoup(resp.content, "html.parser")
 
     def og(prop: str) -> str:
         tag = soup.find("meta", property=f"og:{prop}")
@@ -182,49 +198,229 @@ def _clean_credit_text(text: str) -> str:
     return cleaned
 
 
+# 헤드라인 2줄 분할 — 사실형 서술어 (이 단어가 들어간 어절을 2줄 끝에 배치)
+_ACTION_WORDS = [
+    "개막", "개최", "개관", "공개", "오픈", "재개", "개장", "폐막",
+    "선정", "수상", "유치", "출범", "공개돼", "열린다", "열려", "연다",
+]
+_HEADLINE_MAX = 11
+
+
 def _suggest_headlines(title: str, description: str) -> tuple:
-    """기사 제목 기반 2줄 헤드라인 초안 생성."""
-    raw = title or description or ""
-    text = raw.strip()
-    text = re.sub(r"\[[^\]]+\]", " ", text)
-    text = re.sub(r"\([^)]+\)", " ", text)
-    text = re.sub(r"[\"“”'’]", "", text)
-
-    for sep in [" | ", "｜", "ㅣ"]:
-        if sep in text:
-            text = text.split(sep)[0]
-
-    text = re.sub(r"\s+", " ", text).strip()
-
-    quote_match = re.search(r"[\"“'‘]?([^\"”'’]{2,20})[\"”'’]?\s+(개막|개최|오픈|재개|공개|진행|개장|개편|운영|상영|전시|뜬다|연다)", title or "")
-    if quote_match:
-        quoted = re.sub(r"\s+", "", quote_match.group(1))
-        action = re.sub(r"\s+", "", quote_match.group(2))
-        prefix = (title or "").split(quote_match.group(1))[0]
-        prefix_words = re.sub(r"[\"“”'’]", "", prefix).strip().split()
-        place = prefix_words[-1] if prefix_words else ""
-        line1 = _fit_headline(quoted)
-        line2 = _fit_headline(f"{place}{action}")
-    else:
-        text = text.split("…")[0]
-        words = [w for w in text.split() if w]
-        if len(words) >= 2:
-            line1 = _fit_headline("".join(words[: max(1, len(words) // 2)]))
-            line2 = _fit_headline("".join(words[max(1, len(words) // 2) :]))
-        else:
-            compact = text.replace(" ", "")
-            midpoint = max(1, min(len(compact) // 2, 9))
-            line1 = _fit_headline(compact[:midpoint])
-            line2 = _fit_headline(compact[midpoint:])
-
+    """기사 제목 기반 2줄 헤드라인 초안 생성 (자연스러운 한국어 우선)."""
+    line1, line2 = split_headline(title or description or "")
     if not line2:
-        line2 = _fit_headline(description or "전시 소식")
+        line2 = split_headline(description or "전시 소식")[0] or "전시 소식"
     return line1, line2
 
 
-def _fit_headline(text: str) -> str:
-    compact = re.sub(r"\s+", "", text)
-    compact = compact[:11]
-    if len(compact) <= 9:
-        return compact
-    return compact[:9]
+def split_headline(title: str, max_len: int = _HEADLINE_MAX) -> tuple:
+    """기사 제목을 2줄 헤드라인으로 분할.
+
+    원칙:
+    - 단어(어절) 중간 절단 금지 — 공백 경계에서만 자름
+    - 가능하면 1줄=기관·전시명(명사), 2줄=`~ 개막` 등 사실형 서술
+    - 따옴표 인용 티저("부산의 봄...")보다 사실 절을 우선 채택
+    """
+    text = (title or "").strip()
+    text = re.sub(r"\[[^\]]*\]", " ", text)          # [단독], [포토] 등 제거
+    text = re.sub(r"\([^)]*\)", " ", text)
+    text = re.sub(r"[\"“”'‘’《》〈〉<>]", "", text)   # 따옴표·괄호류 제거 (내용은 유지)
+    text = re.sub(r"\s+", " ", text).strip()
+
+    # 절 분리: "…", "ㅣ", "|", "—" 등. 사실형 서술어가 포함된 절을 우선 채택
+    clauses = [c.strip() for c in re.split(r"…|\.\.\.|[|｜ㅣ]|—|–| - ", text) if c.strip()]
+    if not clauses:
+        return "오늘의", "아트 뉴스"
+    chosen = next(
+        (c for c in clauses if any(a in c for a in _ACTION_WORDS)),
+        max(clauses, key=len),
+    )
+
+    words = chosen.split()
+    if len(words) == 1:
+        return _fit_words(words, max_len), ""
+
+    # 사실형 서술어가 든 어절을 찾아 그 어절이 2줄의 끝이 되도록 분할
+    action_idx = next(
+        (i for i in range(len(words) - 1, -1, -1)
+         if any(a in words[i] for a in _ACTION_WORDS)),
+        None,
+    )
+    if action_idx is not None and action_idx > 0:
+        line2_words = words[action_idx:action_idx + 1]
+        # 2줄 앞쪽으로 어절을 최대한 붙임 (1줄에 최소 1어절은 남김)
+        j = action_idx - 1
+        while j >= 1:
+            w = words[j]
+            # 연도·숫자 토큰("1956-1976" 등)은 2줄이 너무 짧을 때만 건너뛰고 계속 확장
+            if re.fullmatch(r"[\d\-~.·]+", w):
+                if len(" ".join(line2_words)) < 4:
+                    j -= 1
+                    continue
+                break
+            if _join_len(line2_words, w) > max_len:
+                break
+            line2_words.insert(0, w)
+            j -= 1
+        line1 = _fit_words(words[: j + 1], max_len)
+        line2 = " ".join(line2_words)
+        if len(line2) > max_len:
+            line2 = _fit_words(line2_words, max_len)
+        line1 = _prefer_org_word(line1, line2, text, max_len)
+        return _polish_line(line1), _polish_line(line2)
+
+    # 서술어가 없으면 글자 수 기준 절반에서 어절 경계로 분할
+    total = len(" ".join(words))
+    line1_words, acc = [], 0
+    for i, w in enumerate(words):
+        if line1_words and (acc + 1 + len(w) > max_len or acc >= total // 2):
+            return (
+                _polish_line(_fit_words(line1_words, max_len)),
+                _polish_line(_fit_words(words[i:], max_len)),
+            )
+        line1_words.append(w)
+        acc += len(w) + (1 if acc else 0)
+    return _polish_line(_fit_words(line1_words, max_len)), ""
+
+
+def _join_len(words: list, extra: str) -> int:
+    return len(" ".join([extra] + words))
+
+
+_ORG_SUFFIXES = ("미술관", "박물관", "갤러리", "뮤지엄", "아트센터", "미술제", "비엔날레", "아트페어", "문화원")
+_ORG_SUFFIX_RE = re.compile("|".join(_ORG_SUFFIXES))
+
+
+def _prefer_org_word(line1: str, line2: str, full_text: str, max_len: int) -> str:
+    """1줄에 기관명이 없는데 제목 다른 절에 고유 기관명이 있으면 1줄을 기관명으로 교체.
+    예: '리움미술관, ... 개막' → 1줄 '리움미술관'
+
+    고유명 조건: '리움미술관'처럼 접미사로 끝나는 합성어만 인정.
+    단독 '뮤지엄'이나 조사 붙은 '갤러리서'는 제외."""
+    if _ORG_SUFFIX_RE.search(line1) or _ORG_SUFFIX_RE.search(line2):
+        return line1
+    for w in full_text.split():
+        cleaned = w.strip(",.·")
+        for suffix in _ORG_SUFFIXES:
+            if (
+                cleaned.endswith(suffix)
+                and len(cleaned) > len(suffix)
+                and len(cleaned) <= max_len
+            ):
+                return cleaned
+    return line1
+
+
+def _polish_line(line: str) -> str:
+    return line.strip(" ,.·—–-")
+
+
+def _fit_words(words: list, max_len: int) -> str:
+    """어절 단위로 max_len 이내까지만 이어 붙임. 첫 어절이 초과하면 그 어절만 절단."""
+    out, acc = [], 0
+    for w in words:
+        add = len(w) + (1 if out else 0)
+        if acc + add > max_len:
+            break
+        out.append(w)
+        acc += add
+    if not out and words:
+        return words[0][:max_len]
+    return " ".join(out)
+
+
+# ── 기사 내 최적 이미지 선택 ──────────────────────────────────────────────────
+
+def find_best_image(
+    article_url: str,
+    min_width: int = 600,
+    min_height: int = 450,
+    min_ratio: float = 0.0,
+    max_candidates: int = 6,
+):
+    """기사에서 가장 좋은 이미지 URL과 크기 반환.
+
+    og:image → twitter:image → 본문 <img> 순으로 후보를 모은 뒤
+    실제 다운로드해 해상도·비율을 검증하고 점수가 가장 높은 것을 채택.
+    og:image가 저해상도 썸네일인 경우 본문 원본 이미지로 대체된다.
+
+    Returns:
+        (image_url, width, height) 또는 (None, None, None)
+    """
+    try:
+        resp = http_get(article_url, timeout=15)
+        soup = BeautifulSoup(resp.content, "html.parser")
+    except Exception as e:
+        print(f"  [skip] 기사 fetch 실패: {e}", file=sys.stderr)
+        return None, None, None
+
+    candidates = []
+
+    def _add(u: str):
+        u = (u or "").strip()
+        if u.startswith("//"):
+            u = "https:" + u
+        elif u.startswith("/"):
+            p = urlparse(article_url)
+            u = f"{p.scheme}://{p.netloc}{u}"
+        if u.startswith("http") and u not in candidates:
+            candidates.append(u)
+
+    og = soup.find("meta", property="og:image")
+    if og:
+        _add(og.get("content", ""))
+    tw = soup.find("meta", attrs={"name": "twitter:image"})
+    if tw:
+        _add(tw.get("content", ""))
+    for img in soup.find_all("img", src=True):
+        src = img.get("src", "")
+        if any(x in src.lower() for x in ["logo", "icon", "btn", "badge", "avatar", "/ad/", "banner"]):
+            continue
+        w_hint = img.get("width", "")
+        if w_hint and w_hint.isdigit() and int(w_hint) < 300:
+            continue
+        _add(src)
+
+    best_url, best_w, best_h, best_score = None, 0, 0, -1.0
+    for u in candidates[:max_candidates]:
+        img_obj = _download_pil_image(u)
+        if img_obj is None:
+            continue
+        w, h = img_obj.size
+        if w < min_width or h < min_height:
+            print(f"  [skip] 너무 작음 {w}x{h}: {u[:70]}", file=sys.stderr)
+            continue
+        ratio = h / w
+        if ratio < min_ratio:
+            print(f"  [skip] 가로 비율 {ratio:.2f} (최소 {min_ratio}): {u[:70]}", file=sys.stderr)
+            continue
+        score = _image_score(w, h)
+        print(f"  [후보] {w}x{h} ratio={ratio:.2f} score={score:.2f}: {u[:70]}", file=sys.stderr)
+        if score > best_score:
+            best_url, best_w, best_h, best_score = u, w, h, score
+
+    if best_url:
+        return best_url, best_w, best_h
+    return None, None, None
+
+
+def _download_pil_image(url: str):
+    try:
+        from io import BytesIO
+        from PIL import Image
+        r = http_get(url, timeout=20)
+        ct = r.headers.get("content-type", "")
+        if ct and not ct.startswith("image/"):
+            return None
+        return Image.open(BytesIO(r.content)).convert("RGB")
+    except Exception:
+        return None
+
+
+def _image_score(w: int, h: int) -> float:
+    """세로 비율(포스터 친화)과 해상도가 높을수록 높은 점수."""
+    ratio = h / max(w, 1)
+    ratio_score = min(ratio, 2.0) / 2.0
+    size_score = min(w * h, 4_000_000) / 4_000_000
+    return ratio_score * 0.5 + size_score * 0.5

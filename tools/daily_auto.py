@@ -1,10 +1,11 @@
 """
-매일 자동 뉴스 선별 & Discord 전송 (GitHub Actions 전용).
+매일 자동 뉴스 선별 & Discord 전송 (GitHub Actions 전용 — Claude 스케줄 태스크의 폴백).
 
-개선 사항:
-- pubDate 파싱으로 당일/최근 기사 우선 선별 (시의성)
-- og:image 실제 다운로드해서 크기·비율 검증 (세로 비율 + 고해상도 우선)
-- 기사 본문 내 이미지도 스캔해 og:image보다 좋은 게 있으면 대체
+선별 파이프라인:
+1. RSS 수집 — 검색 기반 피드(Bing News) + 언론사 피드. 죽은 피드는 자동 스킵
+2. 큐레이션 점수 — 개막·회고전 등 뉴스성 키워드 가점, 인터뷰·칼럼·연재 감점/제외
+3. 최근 30일 발행 이력과 URL·핵심 명사 겹침 검사 (중복 주제 방지)
+4. 기사 내 이미지 실제 다운로드 검증 (해상도·세로 비율) 통과한 상위 3건 발행
 """
 
 import json
@@ -13,29 +14,35 @@ import re
 import sys
 from datetime import date, datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
-from io import BytesIO
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
-import requests
 from bs4 import BeautifulSoup
-from PIL import Image
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from tools.discord_notify_ci import main as notify_main  # noqa: E402
+from tools.article_parser import find_best_image, http_get, split_headline  # noqa: E402
 
 # ── 설정 ────────────────────────────────────────────────────────────────────
 
+
+def _bing_news_rss(query: str) -> str:
+    return f"https://www.bing.com/news/search?q={quote(query)}&format=rss&mkt=ko-KR"
+
+
+# 검색 기반 피드를 앞에 둔다 — 클라우드 IP에서도 안정적으로 응답.
+# 언론사 직접 RSS는 Actions IP에서 403/빈 응답이 잦아 보조용 (실패 시 자동 스킵).
 RSS_FEEDS = [
-    ("https://www.news1.kr/rss/S1N5", "뉴스1"),
-    ("https://rss.joins.com/joins_culture_list.xml", "중앙일보"),
-    ("https://www.mk.co.kr/rss/40300002/", "매일경제"),
+    (_bing_news_rss("미술관 전시 개막"), "빙뉴스-전시"),
+    (_bing_news_rss("갤러리 개인전 개막"), "빙뉴스-개인전"),
+    (_bing_news_rss("아트페어 비엔날레"), "빙뉴스-아트페어"),
+    (_bing_news_rss("회고전 특별전 미술"), "빙뉴스-회고전"),
     ("https://design.co.kr/feed", "디자인프레스"),
-    ("https://biz.heraldcorp.com/rss/0001016.xml", "헤럴드경제"),
-    ("https://www.kmib.co.kr/rss/culture.xml", "국민일보"),
-    ("https://www.news1.kr/rss/S1N6", "뉴스1-문화"),
+    ("https://www.yna.co.kr/rss/culture.xml", "연합뉴스"),
+    ("https://www.khan.co.kr/rss/rssdata/culture_news.xml", "경향신문"),
+    ("https://www.segye.com/Articles/RSSList/segye_culture.xml", "세계일보"),
+    ("https://www.mk.co.kr/rss/30000023/", "매일경제"),
 ]
 
 ART_KEYWORDS = [
@@ -44,7 +51,31 @@ ART_KEYWORDS = [
     "조각", "회화", "사진전", "설치", "퍼포먼스", "드로잉",
 ]
 
-# 고빈도 노출로 제외할 키워드 (너무 자주 등장해 식상해지는 주제)
+# 뉴스성 가점 키워드 (점수)
+# 레퍼런스 채널(artart.today, b.framemag 등)이 다루는 콘텐츠 유형 반영:
+# 대형 회고전·글로벌 아트씬·셀럽/팝컬처 접점·브랜드 콜라보에 가점
+BOOST_KEYWORDS = {
+    "개막": 5, "개관": 5, "회고전": 4, "특별전": 3, "기획전": 3,
+    "비엔날레": 4, "아트페어": 4, "첫 공개": 3, "공개": 2, "수상": 3,
+    "선정": 2, "미술관": 2, "뮤지엄": 2, "갤러리": 1, "개인전": 3,
+    "신작": 2, "무료": 2, "오픈": 2, "유치": 2,
+    "콜라보": 3, "팝업": 2, "협업": 2, "한정": 1,
+    "해외": 1, "세계 최초": 3, "아시아 최초": 3, "국내 최초": 2,
+    "리움": 2, "호암": 2, "국립현대미술관": 2, "아모레퍼시픽미술관": 2,
+}
+
+# 감점 키워드 — 뉴스가 아닌 콘텐츠 유형
+PENALTY_KEYWORDS = {
+    "인터뷰": -8, "칼럼": -8, "기고": -8, "오피니언": -8, "사설": -8,
+    "멘토": -6, "연재": -6, "부고": -10, "별세": -6, "단신": -4,
+    "모집": -5, "공모": -4, "강좌": -6, "교육": -4, "체험": -3,
+    "할인": -3, "이벤트 당첨": -5, "포토뉴스": -4, "동정": -6,
+}
+
+# 연재·인터뷰 마커 — 발견 시 즉시 제외
+HARD_EXCLUDE_RE = re.compile(r"[①②③④⑤⑥⑦⑧⑨⑩⑪⑫]|\[\s*(인터뷰|칼럼|기고|사설|오피니언|연재)|Q\s*&\s*A|\d+편\b")
+
+# 공연 등 시각예술과 거리 먼 항목 (미술 키워드 동반 없으면 제외)
 OVEREXPOSED_KEYWORDS = [
     "공연", "뮤지컬", "연극", "클래식", "오페라",
     "영화", "드라마", "콘서트",
@@ -55,23 +86,27 @@ BLOCKED_DOMAINS = {
     "cha.go.kr", "gov.kr",
 }
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
-}
-
-# 이미지 품질 기준
-MIN_WIDTH = 800          # 최소 가로 (px)
-MIN_HEIGHT = 600         # 최소 세로 (px)
-MIN_PORTRAIT_RATIO = 0.6 # height/width 최소 비율 (1.0=정사각, >1=세로)
+# 발행 기준
+MIN_SCORE = 3.0          # 큐레이션 점수 하한
+MIN_WIDTH = 800          # 이미지 최소 가로 (px)
+MIN_HEIGHT = 600         # 이미지 최소 세로 (px)
+MIN_PORTRAIT_RATIO = 0.6  # height/width 최소 비율
 
 
 # ── RSS 파싱 ─────────────────────────────────────────────────────────────────
 
-def fetch_rss(url: str) -> list[dict]:
-    r = requests.get(url, headers=HEADERS, timeout=15)
-    r.raise_for_status()
+def _unwrap_redirect(url: str) -> str:
+    """Bing News 등 리다이렉트 링크에서 원 기사 URL 추출."""
+    host = urlparse(url).netloc.lower()
+    if "bing.com" in host:
+        qs = parse_qs(urlparse(url).query)
+        if qs.get("url"):
+            return unquote(qs["url"][0])
+    return url
+
+
+def fetch_rss(url: str) -> list:
+    r = http_get(url, timeout=15)
     soup = BeautifulSoup(r.content, "xml")
     items = []
     for it in soup.find_all("item"):
@@ -79,10 +114,11 @@ def fetch_rss(url: str) -> list[dict]:
         link_tag = it.find("link")
         if not (title_tag and link_tag):
             continue
+        link = _unwrap_redirect((link_tag.text or "").strip())
         pub = it.find("pubDate") or it.find("pubdate")
         items.append({
             "title": (title_tag.text or "").strip(),
-            "url": (link_tag.text or "").strip(),
+            "url": link,
             "pub_raw": (pub.text or "").strip() if pub else "",
         })
     return items
@@ -104,7 +140,6 @@ def item_age_hours(item: dict) -> float:
 def is_art_related(title: str) -> bool:
     if not any(k in title for k in ART_KEYWORDS):
         return False
-    # 공연/영화 등 시각예술과 거리 먼 항목 제외
     if any(k in title for k in OVEREXPOSED_KEYWORDS) and not any(
         k in title for k in ["미술", "아트", "갤러리", "작가", "전시"]
     ):
@@ -112,17 +147,35 @@ def is_art_related(title: str) -> bool:
     return True
 
 
-def load_recent_published(days: int = 7) -> set[str]:
-    """최근 N일 발행된 JSON에서 news_url 집합 반환 (중복 방지용)."""
-    published_urls: set[str] = set()
+def curation_score(title: str, age_hours: float) -> float:
+    """뉴스성·시의성 기반 큐레이션 점수. 높을수록 좋음. 음수면 부적합."""
+    if HARD_EXCLUDE_RE.search(title):
+        return -100.0
+    score = 0.0
+    for kw, pts in BOOST_KEYWORDS.items():
+        if kw in title:
+            score += pts
+    for kw, pts in PENALTY_KEYWORDS.items():
+        if kw in title:
+            score += pts
+    # 시의성: 24시간 이내 +3 → 72시간에서 0으로 선형 감소
+    score += max(0.0, (72 - min(age_hours, 72)) / 72 * 3)
+    return score
+
+
+# ── 발행 이력 (중복 방지) ──────────────────────────────────────────────────────
+
+def load_recent_published(days: int = 30):
+    """최근 N일 발행 JSON에서 (URL 집합, 제목 핵심명사 집합 리스트) 반환."""
+    published_urls = set()
+    noun_sets = []
     output_dir = os.path.join(ROOT, "output", "news")
     if not os.path.isdir(output_dir):
-        return published_urls
+        return published_urls, noun_sets
     cutoff = date.today() - timedelta(days=days)
     for fname in os.listdir(output_dir):
         if not fname.endswith(".json"):
             continue
-        # 파일명 날짜 파싱 (YYYY-MM-DD_xxx.json)
         try:
             file_date = date.fromisoformat(fname[:10])
             if file_date < cutoff:
@@ -132,24 +185,35 @@ def load_recent_published(days: int = 7) -> set[str]:
         try:
             with open(os.path.join(output_dir, fname), encoding="utf-8") as f:
                 meta = json.load(f)
-            url = meta.get("news_url", "")
-            if url:
-                published_urls.add(url)
-            # 후보 URL도 수집해 주제 중복 방지
-            for cand in meta.get("candidates", []):
-                if cand.get("url"):
-                    published_urls.add(cand["url"])
         except Exception:
             continue
-    return published_urls
+        if meta.get("news_url"):
+            published_urls.add(meta["news_url"])
+        for cand in meta.get("candidates", []):
+            if cand.get("url"):
+                published_urls.add(cand["url"])
+        nouns = extract_key_nouns(
+            f"{meta.get('news_title', '')} {meta.get('headline1', '')} {meta.get('headline2', '')}"
+        )
+        if nouns:
+            noun_sets.append(nouns)
+    return published_urls, noun_sets
 
 
-def extract_key_nouns(title: str) -> set[str]:
+def extract_key_nouns(title: str) -> set:
     """제목에서 핵심 고유명사 추출 (3자 이상 연속 한글/영문 단어)."""
     words = re.findall(r"[가-힣A-Za-z]{3,}", title)
-    # 너무 일반적인 단어 제외
-    stop = {"전시", "개막", "개관", "공개", "특별전", "기획전", "미술관", "갤러리", "박물관"}
+    stop = {
+        "전시", "개막", "개관", "공개", "특별전", "기획전", "미술관", "갤러리",
+        "박물관", "예술", "미술", "작가", "아트", "서울", "한국", "오늘", "이번",
+    }
     return {w for w in words if w not in stop}
+
+
+def is_dup_topic(title: str, noun_sets: list) -> bool:
+    """발행 이력 또는 이번 세션의 다른 후보와 핵심 명사가 2개 이상 겹치면 중복."""
+    nouns = extract_key_nouns(title)
+    return any(len(nouns & s) >= 2 for s in noun_sets)
 
 
 def is_blocked(url: str) -> bool:
@@ -157,242 +221,119 @@ def is_blocked(url: str) -> bool:
     return any(host == b or host.endswith("." + b) for b in BLOCKED_DOMAINS)
 
 
-# ── 이미지 품질 검증 ──────────────────────────────────────────────────────────
-
-def download_image(url: str) -> Image.Image | None:
-    """이미지 URL을 다운로드해 PIL Image 반환. 실패 시 None."""
-    try:
-        r = requests.get(url, headers=HEADERS, timeout=20, allow_redirects=True)
-        if r.status_code != 200:
-            return None
-        ct = r.headers.get("content-type", "")
-        if not ct.startswith("image/"):
-            return None
-        return Image.open(BytesIO(r.content)).convert("RGB")
-    except Exception:
-        return None
-
-
-def image_score(w: int, h: int) -> float:
-    """크기와 비율로 이미지 점수 계산. 높을수록 좋음.
-    - 세로 비율 가중치: portrait일수록 우선
-    - 해상도 가중치: 클수록 우선
-    """
-    ratio = h / max(w, 1)
-    # 0.8(포스터 비율)에 가까울수록 높은 비율 점수
-    ratio_score = min(ratio, 2.0) / 2.0
-    size_score = min(w * h, 4_000_000) / 4_000_000
-    return ratio_score * 0.6 + size_score * 0.4
-
-
-def find_best_image(article_url: str) -> tuple[str, int, int] | tuple[None, None, None]:
-    """기사에서 가장 좋은 이미지 URL과 크기 반환.
-
-    1. og:image 시도
-    2. twitter:image 시도
-    3. 기사 본문 <img> 태그 스캔
-    → 유효한 것들 중 image_score 가장 높은 것 반환
-    Returns:
-        (image_url, width, height) or (None, None, None)
-    """
-    try:
-        r = requests.get(article_url, headers=HEADERS, timeout=15)
-        r.raise_for_status()
-        r.encoding = r.apparent_encoding
-        soup = BeautifulSoup(r.text, "html.parser")
-    except Exception as e:
-        print(f"  [skip] 기사 fetch 실패: {e}", file=sys.stderr)
-        return None, None, None
-
-    # 후보 이미지 URL 수집
-    candidates = []
-
-    def _add(url: str):
-        url = url.strip()
-        if url and url.startswith("http"):
-            candidates.append(url)
-
-    og = soup.find("meta", property="og:image")
-    if og and og.get("content"):
-        _add(og["content"])
-
-    tw = soup.find("meta", attrs={"name": "twitter:image"})
-    if tw and tw.get("content"):
-        _add(tw["content"])
-
-    # 기사 본문 img 태그 (넓이 200 이상 힌트 우선)
-    for img in soup.find_all("img", src=True):
-        src = img.get("src", "")
-        if not src:
-            continue
-        # 상대 경로 변환
-        if src.startswith("//"):
-            src = "https:" + src
-        elif src.startswith("/"):
-            parsed = urlparse(article_url)
-            src = f"{parsed.scheme}://{parsed.netloc}{src}"
-        if not src.startswith("http"):
-            continue
-        # 아이콘·로고 제외
-        if any(x in src.lower() for x in ["logo", "icon", "btn", "badge", "avatar", "ad"]):
-            continue
-        w_hint = img.get("width", "")
-        if w_hint and w_hint.isdigit() and int(w_hint) < 200:
-            continue
-        candidates.append(src)
-
-    if not candidates:
-        print("  [skip] 이미지 후보 없음", file=sys.stderr)
-        return None, None, None
-
-    # 중복 제거 (순서 유지)
-    seen = set()
-    unique = []
-    for c in candidates:
-        if c not in seen:
-            seen.add(c)
-            unique.append(c)
-
-    # 각 후보 다운로드 & 점수 계산 (최대 5개)
-    best_url, best_w, best_h, best_score = None, 0, 0, -1.0
-    for url in unique[:5]:
-        img_obj = download_image(url)
-        if img_obj is None:
-            continue
-        w, h = img_obj.size
-        if w < MIN_WIDTH or h < MIN_HEIGHT:
-            print(f"  [skip] 너무 작음 {w}x{h}: {url[:60]}", file=sys.stderr)
-            continue
-        ratio = h / w
-        if ratio < MIN_PORTRAIT_RATIO:
-            print(f"  [skip] 가로 비율 {ratio:.2f} (최소 {MIN_PORTRAIT_RATIO}): {url[:60]}", file=sys.stderr)
-            continue
-        score = image_score(w, h)
-        print(f"  [후보] {w}x{h} ratio={ratio:.2f} score={score:.2f}: {url[:60]}", file=sys.stderr)
-        if score > best_score:
-            best_url, best_w, best_h, best_score = url, w, h, score
-
-    if best_url:
-        return best_url, best_w, best_h
-    return None, None, None
-
-
 # ── 후보 선별 ─────────────────────────────────────────────────────────────────
 
-def pick_candidates(n: int = 3, max_age_hours: float = 36.0, skip_urls: set[str] | None = None) -> list[dict]:
-    """RSS에서 시의성 + 이미지 품질 통과한 상위 n개 후보 반환.
-
-    max_age_hours 이내 기사 우선. 없으면 72h로 재시도.
-    skip_urls: 이미 발행됐거나 이번 세션에 선택된 URL 집합 (중복 방지)
-    """
-    if skip_urls is None:
-        skip_urls = load_recent_published(days=7)
-        print(f"[중복제외] 최근 7일 발행 {len(skip_urls)}건 로드", file=sys.stderr)
+def pick_candidates(n: int = 3, max_age_hours: float = 36.0) -> list:
+    """점수 상위 + 이미지 검증 통과한 후보 n개 반환. 부족하면 72h로 완화."""
+    skip_urls, noun_sets = load_recent_published(days=30)
+    print(f"[중복제외] 최근 30일 발행 {len(noun_sets)}건 로드", file=sys.stderr)
 
     for age_limit in [max_age_hours, 72.0]:
         print(f"\n[선별] 최대 {age_limit:.0f}시간 이내 기사 탐색", file=sys.stderr)
-        results = _pick_from_feeds(age_limit, skip_urls, max_pick=n)
+        results = _pick_from_feeds(age_limit, skip_urls, noun_sets, max_pick=n)
         if results:
             return results
     print("[오류] 모든 RSS 소진, 후보 없음", file=sys.stderr)
     return []
 
 
-def pick_candidate(max_age_hours: float = 36.0, skip_urls: set[str] | None = None):
-    """하위 호환용: 단일 후보 반환."""
-    results = pick_candidates(n=1, max_age_hours=max_age_hours, skip_urls=skip_urls)
-    return results[0] if results else None
-
-
-def _pick_from_feeds(age_limit: float, skip_urls: set[str], max_pick: int = 3) -> list[dict]:
-    # 모든 피드를 먼저 수집 후 최신 순 정렬 (단일 피드 편중 방지)
-    all_fresh: list[dict] = []
+def _pick_from_feeds(age_limit: float, skip_urls: set, noun_sets: list, max_pick: int = 3) -> list:
+    all_fresh = []
+    seen_urls = set()
     for feed_url, source_name in RSS_FEEDS:
-        print(f"\n[RSS] {source_name} {feed_url}", file=sys.stderr)
+        print(f"\n[RSS] {source_name} {feed_url[:80]}", file=sys.stderr)
         try:
             items = fetch_rss(feed_url)
         except Exception as e:
             print(f"  [skip] fetch 실패: {e}", file=sys.stderr)
             continue
 
-        art_items = [
-            it for it in items
-            if is_art_related(it["title"]) and not is_blocked(it["url"])
-        ]
-        fresh_items = [it for it in art_items if item_age_hours(it) <= age_limit]
-
-        # 이미 발행된 URL 제외
-        deduped = [it for it in fresh_items if it["url"] not in skip_urls]
-
-        print(
-            f"  전체={len(items)} 아트={len(art_items)} 최신={len(fresh_items)} "
-            f"중복제외후={len(deduped)}건",
-            file=sys.stderr,
-        )
-        for it in deduped:
+        kept = 0
+        for it in items:
+            if it["url"] in seen_urls or it["url"] in skip_urls:
+                continue
+            if not is_art_related(it["title"]) or is_blocked(it["url"]):
+                continue
+            age = item_age_hours(it)
+            if age > age_limit:
+                continue
+            score = curation_score(it["title"], age)
+            if score < MIN_SCORE:
+                continue
+            seen_urls.add(it["url"])
             it["_source"] = source_name
-        all_fresh.extend(deduped)
+            it["_score"] = score
+            it["_age"] = age
+            all_fresh.append(it)
+            kept += 1
+        print(f"  전체={len(items)} 통과={kept}건", file=sys.stderr)
 
     if not all_fresh:
         return []
 
-    # 최신 순 정렬
-    all_fresh.sort(key=lambda x: item_age_hours(x))
+    # 큐레이션 점수 내림차순 (동점이면 최신순)
+    all_fresh.sort(key=lambda x: (-x["_score"], x["_age"]))
 
-    results: list[dict] = []
-    tried: set[str] = set()
-    scan_limit = max(18, max_pick * 6)
+    results = []
+    session_nouns = list(noun_sets)  # 발행 이력 + 이번 세션 채택분
+    scan_limit = max(20, max_pick * 7)
     for item in all_fresh[:scan_limit]:
-        if item["url"] in tried:
+        if is_dup_topic(item["title"], session_nouns):
+            print(f"  [중복주제] {item['title'][:50]}", file=sys.stderr)
             continue
-        tried.add(item["url"])
-        age = item_age_hours(item)
-        source_name = item.pop("_source", "")
-        print(f"  [{age:.1f}h] {item['title'][:50]} ({source_name})", file=sys.stderr)
-        img_url, w, h = find_best_image(item["url"])
-        if img_url:
-            print(f"  ✓ 채택 {len(results)+1}/{max_pick}: {w}x{h} {img_url[:60]}", file=sys.stderr)
-            results.append({
-                "title": item["title"],
-                "url": item["url"],
-                "direct_image_url": img_url,
-                "source_name": source_name,
-                "age_hours": age,
-            })
-            if len(results) >= max_pick:
-                break
+        print(
+            f"  [score={item['_score']:.1f} {item['_age']:.1f}h] {item['title'][:50]} ({item['_source']})",
+            file=sys.stderr,
+        )
+        img_url, w, h = find_best_image(
+            item["url"],
+            min_width=MIN_WIDTH,
+            min_height=MIN_HEIGHT,
+            min_ratio=MIN_PORTRAIT_RATIO,
+        )
+        if not img_url:
+            continue
+        print(f"  ✓ 채택 {len(results)+1}/{max_pick}: {w}x{h} {img_url[:70]}", file=sys.stderr)
+        results.append({
+            "title": item["title"],
+            "url": item["url"],
+            "direct_image_url": img_url,
+            "source_name": _publisher_name(item["url"], item["_source"]),
+            "age_hours": item["_age"],
+        })
+        session_nouns.append(extract_key_nouns(item["title"]))
+        if len(results) >= max_pick:
+            break
 
     return results
 
 
+def _publisher_name(article_url: str, feed_name: str) -> str:
+    """출처 표기용 이름. 검색 피드면 기사 도메인, 언론사 피드면 피드명."""
+    if feed_name.startswith("빙뉴스"):
+        host = urlparse(article_url).netloc
+        return re.sub(r"^www\.", "", host)
+    return feed_name
+
+
 # ── 헤드라인 & 캡션 ──────────────────────────────────────────────────────────
 
-def make_headlines(title: str) -> tuple[str, str]:
-    """기사 제목에서 2줄 헤드라인 (각 줄 최대 11자)."""
-    clean = re.sub(r"\[[^\]]+\]", "", title)
-    clean = re.sub(r"\([^)]+\)", "", clean)
-    clean = re.sub(r"[\"'''""]", "", clean)
-    clean = clean.split("…")[0].split("·")[0].strip()
-    clean = re.sub(r"\s+", " ", clean)
-
-    words = clean.split()
-    if not words:
-        return "오늘의", "아트뉴스"
-    if len(words) == 1:
-        w = words[0]
-        mid = max(1, len(w) // 2)
-        return w[:mid][:11], (w[mid:][:11] or "소식")
-
-    mid = max(1, len(words) // 2)
-    line1 = "".join(words[:mid])[:11]
-    line2 = "".join(words[mid:])[:11]
-    return line1, (line2 or "소식")
+def make_headlines(title: str) -> tuple:
+    """기사 제목에서 자연스러운 2줄 헤드라인 (어절 경계 분할, 각 줄 최대 11자)."""
+    line1, line2 = split_headline(title)
+    if not line1:
+        line1 = "오늘의"
+    if not line2:
+        line2 = "아트 뉴스"
+    return line1, line2
 
 
 def make_caption(title: str, source_name: str) -> str:
+    clean = re.sub(r"\[[^\]]*\]", "", title).strip()
+    clean = re.sub(r"\s+", " ", clean)
     return (
-        f"{title.strip()}\n\n"
-        f"#아트매거진 #문화예술 #전시추천 #현대미술 #{source_name}"
+        f"{clean}\n\n"
+        f"#아트매거진 #문화예술 #전시추천 #현대미술 #전시소식"
     )
 
 
@@ -426,6 +367,7 @@ def main() -> int:
             "headline2": h2,
             "source": source_str,
             "caption": caption,
+            "published_at": today,
             "candidates": all_titles,
         }
 

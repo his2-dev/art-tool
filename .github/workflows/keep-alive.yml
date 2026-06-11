@@ -9,14 +9,30 @@ on:
 jobs:
   ping:
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 3
     steps:
       - name: Ping Streamlit app
         run: |
           URL="https://art-tool-news.streamlit.app"
-          HTTP_CODE=$(curl -sSL -o /dev/null -w "%{http_code}" --max-time 30 "$URL")
-          echo "✅ Pinged $URL — HTTP $HTTP_CODE at $(date -u)"
-          # 200/300 계열이면 정상, 그 외는 경고만 (실패시키지 않음)
-          if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 400 ]; then
-            echo "::warning::Unexpected status $HTTP_CODE — 앱이 슬립일 수 있음"
+
+          # 1차: 헬스 엔드포인트 — 메인 페이지의 무한 리다이렉트 루프(curl 47 에러)를 피해
+          #      앱 컨테이너까지 직접 도달
+          HTTP_CODE=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 30 --max-redirs 10 -L \
+            "$URL/_stcore/health" || echo "000")
+          echo "health endpoint: HTTP $HTTP_CODE"
+
+          # 2차: 실패 시 메인 페이지로 재시도 (쿠키 저장 — 쿠키 기반 리다이렉트 대응)
+          if [ "$HTTP_CODE" != "200" ]; then
+            HTTP_CODE=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 45 --max-redirs 10 -L \
+              -b /tmp/cookies.txt -c /tmp/cookies.txt \
+              -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" \
+              "$URL/" || echo "000")
+            echo "root page: HTTP $HTTP_CODE"
+          fi
+
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 400 ] 2>/dev/null; then
+            echo "✅ 앱 응답 정상 (HTTP $HTTP_CODE) at $(date -u)"
+          else
+            # 핑 실패는 경고만 — 잡 자체는 실패시키지 않음 (반복 ❌ 알림 방지)
+            echo "::warning::핑 실패 (HTTP $HTTP_CODE) — 앱이 슬립 상태일 수 있습니다. https://art-tool-news.streamlit.app 를 브라우저에서 한 번 열어 깨워주세요."
           fi

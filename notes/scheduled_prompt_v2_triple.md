@@ -1,4 +1,4 @@
-# 스케줄 태스크 프롬프트 — p.art_mag 일일 뉴스 썸네일 자동화
+# 스케줄 태스크 프롬프트 — p.art_mag 일일 뉴스 썸네일 자동화 (v3.1)
 
 > 이 파일 전체를 Claude Code 스케줄 태스크 설정에 붙여넣기 하세요.
 > 사용자 확인 없이 끝까지 자동 진행합니다.
@@ -9,57 +9,43 @@
 오늘의 문화예술 뉴스 3건 선별 → 썸네일 이미지 3개 생성 → 커밋 푸시 → Discord 전송까지 자동 진행.
 **사용자 확인 단계 없음. 끝까지 혼자 진행.**
 
+**편집 기준점**: artart.today·b.framemag 같은 아트 인스타 매거진이 "오늘 올릴 법한" 소식만 고른다.
+보도자료 받아쓰기, 지역 행사 알림, 인터뷰·칼럼 연재는 우리 콘텐츠가 아니다.
+
 ---
 
 ## STEP 0 — 발행 이력 블랙리스트 추출 (가장 먼저, 반드시 실행)
 
 ```bash
 python3 -c "
-import json, glob, os
+import json, glob, os, re
 from datetime import date, timedelta
 
 cutoff = (date.today() - timedelta(days=30)).isoformat()
 files = sorted(glob.glob('output/news/*.json'), key=os.path.getmtime, reverse=True)
 
-banned_titles = set()
 banned_urls = set()
-banned_words = set()
+rows = []
 
 for f in files:
     try:
         d = json.load(open(f, encoding='utf-8'))
-    except:
+    except Exception:
         continue
     pub = str(d.get('published_at', '2000-01-01'))[:10]
     if pub < cutoff:
         continue
-
-    for field in ['headline1', 'headline2', 'news_title']:
-        val = d.get(field, '')
-        if val:
-            banned_titles.add(val)
-            # 공백 제거 버전도 추가 (오타·띄어쓰기 변형 대응)
-            banned_words.update(w for w in val.replace(' ', '').replace(\"'\", '') if len(w) > 1)
-
     for field in ['news_url', 'image_url']:
-        val = d.get('news_url', '')
-        if val:
-            banned_urls.add(val)
-
+        if d.get(field):
+            banned_urls.add(d[field])
     for c in d.get('candidates', []):
         if c.get('url'):
             banned_urls.add(c['url'])
+    rows.append((pub, d.get('headline1', '?'), d.get('headline2', ''), str(d.get('news_title', '?'))[:50]))
 
-print('=== 30일 발행 이력 (중복 선정 금지) ===')
-for f in sorted(files):
-    try:
-        d = json.load(open(f, encoding='utf-8'))
-    except:
-        continue
-    pub = str(d.get('published_at', '2000-01-01'))[:10]
-    if pub >= cutoff:
-        print(f'  {pub} | {d.get(\"headline1\",\"?\")} | {d.get(\"news_title\",\"?\")[:50]}')
-
+print('=== 30일 발행 이력 (중복 선정 금지 — 작가명·전시명·기관명 변형 포함) ===')
+for pub, h1, h2, t in sorted(rows):
+    print(f'  {pub} | {h1} {h2} | {t}')
 print()
 print('=== 금지 URL 목록 ===')
 for u in sorted(banned_urls):
@@ -70,7 +56,7 @@ for u in sorted(banned_urls):
 **규칙 (예외 없음):**
 - 위 목록에 나온 작가명·전시명·기관명과 같거나 유사한 후보는 즉시 탈락
 - URL이 금지 목록에 있으면 즉시 탈락
-- 오타/띄어쓰기 변형도 같은 대상으로 간주 (예: "데미안 허스트" = "데이미언 허스트" = "Damien Hirst")
+- 오타/띄어쓰기/표기 변형도 같은 대상으로 간주 (예: "데미안 허스트" = "데이미언 허스트" = "Damien Hirst")
 - 전시가 아직 진행 중이어도 이미 발행했으면 **절대 재선정 금지**
 
 ---
@@ -98,9 +84,9 @@ python3 -c "from datetime import date; d=date.today(); print(f'{d.year}년 {d.mo
 
 ---
 
-## STEP 2 — 레퍼런스 채널 동향 파악 (나침반 용도)
+## STEP 2 — 레퍼런스 채널 동향 파악 (필수 — 주제 선정의 기준)
 
-아래 중 최소 3개 검색. 이 채널들이 최근 다룬 주제 = 화제성 검증 완료.
+아래 중 **최소 3개** 검색. 이 채널들이 최근 다룬 주제 = 화제성 검증 완료.
 
 ```
 artart.today 2026 최근
@@ -109,6 +95,19 @@ site:design.co.kr 2026 전시
 site:eyesmag.com 2026 아트
 site:careet.net 2026 전시
 ```
+
+**이 채널들이 올리는 콘텐츠의 공통 프로필 (우리가 따라갈 형식):**
+- 한 장의 강렬한 이미지 + 짧은 정보형 헤드라인 + 큐레이터 친구 말투 캡션
+- "지금 이 주에 가야/봐야 하는" 전시·이벤트 (타이밍이 생명)
+- 셀럽·케이팝·패션·브랜드와 아트의 접점 (MZ 팔로워가 공유하고 싶은 것)
+- 글로벌 아트씬 이슈의 한국 연결고리 (베니스·아트바젤·프리즈에 한국 작가)
+- 대형 회고전·블록버스터 전시는 개막 시점에 정확히
+
+**이 채널들이 절대 안 올리는 것 (우리도 제외):**
+- 인터뷰·칼럼·연재 기사 (①②③ 마커, [인터뷰], 기고)
+- 정부·지자체 보도자료성 행사 알림 (시민 강좌, 공모전, 체험 프로그램)
+- 이미 폐막했거나 결과 보도인 소식 ("5만 명 다녀가" 류)
+- 시각적 임팩트 없는 소식 (정책, 인사, 예산)
 
 ---
 
@@ -120,7 +119,7 @@ site:careet.net 2026 전시
 
 ```
 # A/B/C - 전시·페어·작가
-전시 개막 [M월] 2026 site:news1.kr OR site:mk.co.kr OR site:biz.heraldcorp.com
+전시 개막 [M월] 2026
 아트페어 갤러리 오픈 [M월] [D일] 2026
 
 # D/G - 브랜드·셀럽
@@ -141,12 +140,26 @@ ChatGPT 그림 아트 트렌드 인스타 2026 [M월]
 
 수집 후 각 후보에 대해:
 1. STEP 0 금지 목록 대조 → 겹치면 즉시 제외
-2. 기사 URL 메모
-3. 화이트리스트 도메인 확인
+2. 한국어 기사 URL 확보 → `news_url`
+3. **같은 소식의 영문 보도 검색** → `image_url` 후보 (아래 규칙)
 
-**화이트리스트 (image_url에 사용 가능):** `biz.heraldcorp.com`, `heraldcorp.com`, `news1.kr`, `mk.co.kr`, `joongang.co.kr`, `chosun.com`, `kmib.co.kr`, `design.co.kr`
+### ⚠️ image_url 규칙 (`news_url` ≠ `image_url` — 회색 배경 방지의 핵심)
 
-**블랙리스트 (image_url 절대 불가):** `*.go.kr`, `kh.or.kr`, `korea.kr`, 모든 공공기관 도메인
+CI(GitHub Actions)에서 og:image 추출이 실패하면 회색 배경으로 폴백되어 퀄리티가 망한다.
+한국 주요 뉴스 사이트 다수가 Actions IP를 차단하므로 **image_url은 반드시 아래에서만**:
+
+**✅ 1순위 — 직접 CDN 이미지 URL (`.jpg`/`.png`/`.webp`로 끝나는 URL): 항상 통과**
+- 기사 페이지에서 원본 이미지 주소를 직접 추출해 넣는 것이 가장 확실
+- **가로 1000px 이상** 이미지를 골라야 썸네일이 선명함 (1200x630 og 썸네일은 차선)
+
+**✅ 2순위 — 영문/국제 매체 기사 URL (CI가 og:image 자동 추출):**
+- `koreaherald.com`, `koreajoongangdaily.joins.com`
+- `hypebeast.com`, `dezeen.com`, `wallpaper.com`, `vogue.com`, `architecturaldigest.com`
+- 갤러리 공식 영문: `kukjegallery.com`, `pkmgallery.com`, `lvmh.com`
+
+**⚠️ 3순위 — 국내 매체 (간헐적 성공, curl_cffi 우회 적용됨): `design.co.kr`, `mk.co.kr`, `chosun.com`, `joongang.co.kr`, `kmib.co.kr`**
+
+**❌ 절대 불가:** `*.go.kr`, `kh.or.kr`, `korea.kr` 등 정부·공공기관 / `biz.heraldcorp.com`, `news1.kr` (Actions IP 차단 확인됨)
 
 ---
 
@@ -157,11 +170,16 @@ ChatGPT 그림 아트 트렌드 인스타 2026 [M월]
 | 항목 | 만점 | 기준 |
 |------|------|------|
 | 기사 신선도 | 15점 | 오늘·어제: 15점 / 3~7일: 10점 / 8~14일: 5점 / 15일+: 탈락 |
-| 미사용 여부 | 25점 | STEP 0 금지 목록에 없음: 25점 / 동일 이벤트: 즉시 탈락 |
-| MZ 화제성 | 25점 | SNS 반응, 셀럽 연관, 유행 여부 |
-| 시각적 임팩트 | 20점 | 썸네일 한 장으로 멈춰서게 할 이미지 |
-| 레퍼런스 채널 친화도 | 10점 | artart.today·b.framemag가 다룰 법한 주제 |
+| 미사용 여부 | 20점 | STEP 0 금지 목록에 없음: 20점 / 동일 이벤트: 즉시 탈락 |
+| 레퍼런스 채널 친화도 | 20점 | artart.today·b.framemag가 올릴 법한가? 이미 다뤘으면 만점 |
+| MZ 화제성 | 20점 | SNS 반응, 셀럽 연관, 유행 여부 |
+| 시각적 임팩트 | 20점 | 썸네일 한 장으로 멈춰서게 할 이미지가 **실제로 확보 가능**한가 |
 | 카테고리 다양성 | 5점 | 다른 2건과 카테고리 다름 |
+
+**이미지 사전 검증 (시각적 임팩트 점수의 전제):**
+- image_url 후보의 실제 이미지 크기를 확인 (WebFetch로 og:image URL 확인 또는 직접 CDN URL 크기 확인)
+- **가로 800px 미만이면 그 후보는 다른 이미지 출처를 찾거나 탈락** — 저화질 원본은 블러 처리되어 분위기만 남는다
+- 인물 단독 증명사진·로고·포스터 글씨 위주 이미지는 감점
 
 ---
 
@@ -171,13 +189,25 @@ ChatGPT 그림 아트 트렌드 인스타 2026 [M월]
 - [ ] 3건 모두 STEP 0 금지 목록과 무관 (작가명·전시명·URL 전부)
 - [ ] 3건 카테고리 서로 다름
 - [ ] 각 퀄리티 점수 70점 이상
-- [ ] image_url 3개 모두 화이트리스트 도메인
+- [ ] image_url 3개 모두 직접 CDN 또는 화이트리스트 도메인, 가로 800px 이상 확인
 
-**헤드라인 규칙:**
-- 2줄, 각 줄 6~11자
-- 1줄: 기관·전시명·아티스트명 (명사형)
-- 2줄: `개막` `개관` `공개` `개최` `선정` `수상` 등 사실형 동사
+**헤드라인 규칙 (자연스러운 한국어가 최우선):**
+- 2줄, 각 줄 6~11자 (공백 포함)
+- 1줄: 기관·전시명·아티스트명 (명사형) / 2줄: `개막` `개관` `공개` `개최` `선정` `수상` 등 사실형 종결
+- **어절(단어) 중간 절단 절대 금지** — "SDF2026영디자이" 같은 결과물은 실패작
+- 조사·어미가 어색하게 끊기면 안 됨 ("베니스비엔날레에" 처럼 조사로 끝나는 줄 금지)
 - 자극형·감탄형 금지 ("역대급", "충격", "놀라운" 등)
+
+**작성 후 자기 검증 (3건 각각):**
+1. 소리 내어 읽었을 때 자연스러운 한국어인가?
+2. 두 줄만 보고 "무엇이 어디서 어떻게 됐는지" 파악되는가?
+3. 줄 끝이 조사·쉼표로 끝나지 않는가?
+
+| 좋은 예 | 나쁜 예 |
+|---------|---------|
+| `리움미술관` / `여성 설치미술전 개막` | `리움미술관여성설` / `치미술전개막` |
+| `아트부산 2026` / `벡스코 개막` | `부산의봄예술로` / `물든다아트부산` |
+| `김윤신 회고전` / `호암미술관 개최` | `91세조각가김윤` / `신회고전호암` |
 
 ---
 
@@ -190,20 +220,24 @@ python tools/news_poster.py \
     --headline1 "헤드라인 1줄" \
     --headline2 "헤드라인 2줄" \
     --source "© 출처" \
-    --image_url "https://화이트리스트_기사_URL" \
+    --image_url "https://직접CDN_또는_화이트리스트_URL" \
     --scale 2 \
     --output "output/news/YYYY-MM-DD_키워드_N.png"
 ```
 
-> og:image 추출 실패(403)는 정상 — 어두운 배경 PNG 생성 후 GitHub Actions CI가 og:image 복원.
+> - 원본 해상도가 낮으면 스크립트가 자동으로 출력 배율을 낮추고(과업스케일 방지),
+>   그래도 화질이 부족하면 블러 배경으로 처리한다. **블러 처리됐다는 로그가 보이면
+>   더 큰 원본 이미지를 찾아 재생성을 시도할 것** (블러는 최후의 수단).
+> - og:image 추출 실패(403)는 정상 — 어두운 배경 PNG 생성 후 GitHub Actions CI가 og:image 복원.
 
 ---
 
 ## STEP 7 — 캡션 작성 (3건 각각)
 
-- 해요체, 큐레이터 친구 말투
+- 해요체, 큐레이터 친구 말투 (artart.today 캡션 톤 참고)
 - 2~3문장. 첫 문장: "왜 지금 봐야 하는가"
 - 보도자료 톤·합니다체 금지
+- 마지막에 전시 기간·장소 등 실용 정보 1줄 (있으면)
 - 해시태그 5개, 마지막은 항상 `#아트매거진`
 
 **작성 후 자기 검토:**
@@ -220,8 +254,8 @@ python tools/news_poster.py \
 ```json
 {
   "news_title": "기사 제목",
-  "news_url": "기사 URL",
-  "image_url": "화이트리스트 기사 URL",
+  "news_url": "한국어 기사 URL (Discord 링크용)",
+  "image_url": "직접 CDN 이미지 URL 또는 화이트리스트 기사 URL",
   "headline1": "헤드라인 1줄",
   "headline2": "헤드라인 2줄",
   "source": "© 실제 저작권자",
@@ -256,18 +290,13 @@ git push -u origin HEAD
 
 [1] 카테고리: X — 제목
 헤드라인: "1줄" / "2줄"
+이미지: 원본 해상도 / 블러 여부
 캡션:
 (전문)
 
-[2] 카테고리: X — 제목
-헤드라인: "1줄" / "2줄"
-캡션:
-(전문)
+[2] ...
 
-[3] 카테고리: X — 제목
-헤드라인: "1줄" / "2줄"
-캡션:
-(전문)
+[3] ...
 
-❌ 제외된 후보: [제목] — 이유 (금지 목록 충돌 / 점수 미달 / 블랙리스트 도메인 등)
+❌ 제외된 후보: [제목] — 이유 (금지 목록 충돌 / 점수 미달 / 이미지 화질 미달 / 블랙리스트 도메인 등)
 ```

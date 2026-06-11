@@ -52,11 +52,24 @@ def _is_direct_image_url(url: str) -> bool:
 
 
 def _resolve_image_url(image_url: str) -> str:
-    """직접 이미지 URL이면 그대로, 아티클 URL이면 og:image 추출."""
+    """직접 이미지 URL이면 그대로, 아티클 URL이면 기사 내 최적 이미지 추출.
+
+    og:image가 저해상도 썸네일(1200x630 등)인 경우가 많아, 본문 원본 이미지까지
+    스캔해 해상도 검증 후 가장 좋은 것을 사용한다 (썸네일 화질 개선).
+    """
     if not image_url:
         return ""
     if _is_direct_image_url(image_url):
         return image_url
+    try:
+        from tools.article_parser import find_best_image
+        best, w, h = find_best_image(image_url, min_width=500, min_height=400)
+        if best:
+            print(f"[이미지] {w}x{h} 채택: {best[:80]}", file=sys.stderr)
+            return best
+    except Exception as e:
+        print(f"[경고] 최적 이미지 탐색 실패 ({image_url}): {e}", file=sys.stderr)
+    # 폴백: og:image만이라도 시도 (해상도 기준 미달이어도 회색 배경보다 낫다)
     try:
         from tools.article_parser import parse_article
         parsed = parse_article(image_url)
