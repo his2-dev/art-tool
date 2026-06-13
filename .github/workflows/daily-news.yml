@@ -28,12 +28,25 @@ jobs:
         id: guard
         run: |
           TODAY=$(TZ=Asia/Seoul date +%F)
+          # 1) main에 오늘자 큐레이션(_auto 아님)이 이미 있으면 스킵.
           if ls output/news/${TODAY}_*.json 2>/dev/null | grep -v _auto > /dev/null; then
-            echo "오늘자(${TODAY}) 발행물이 이미 존재 — 폴백 발송 생략"
+            echo "오늘자(${TODAY}) 발행물이 main에 이미 존재 — 폴백 발송 생략"
             echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          # 2) 12:00 클로드 스케줄이 임시 브랜치(claude/*)에 오늘자 큐레이션을 올렸으면 스킵.
+          #    (스케줄 결과는 claude/* 브랜치로 푸시되고 discord-notify가 이미 전송함 → 중복 방지)
+          git fetch --quiet --prune origin '+refs/heads/claude/*:refs/remotes/origin/claude/*' || true
+          for b in $(git for-each-ref --format='%(refname)' refs/remotes/origin/claude/ 2>/dev/null); do
+            if git ls-tree -r --name-only "$b" -- output/news 2>/dev/null \
+                 | grep -E "/${TODAY}_" | grep -v _auto > /dev/null; then
+              echo "오늘자(${TODAY}) 큐레이션이 ${b} 에 존재 — 클로드 스케줄이 이미 발행, 폴백 생략"
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "오늘자 발행물 없음 — 폴백 진행"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
         if: steps.guard.outputs.skip != 'true'
