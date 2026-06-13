@@ -2,7 +2,7 @@
 매일 자동 뉴스 선별 & Discord 전송 (GitHub Actions 전용 — Claude 스케줄 태스크의 폴백).
 
 선별 파이프라인:
-1. RSS 수집 — 검색 기반 피드(Bing News) + 언론사 피드. 죽은 피드는 자동 스킵
+1. 후보 수집 — RSS(Bing News + 언론사) + 네이버뉴스 검색 크롤링. 죽은 소스는 자동 스킵
 2. 큐레이션 점수 — 개막·회고전 등 뉴스성 키워드 가점, 인터뷰·칼럼·연재 감점/제외
 3. 최근 30일 발행 이력과 URL·핵심 명사 겹침 검사 (중복 주제 방지)
 4. 기사 내 이미지 실제 다운로드 검증 (해상도·세로 비율) 통과한 상위 3건 발행
@@ -158,6 +158,103 @@ def fetch_rss(url: str) -> list:
     return items
 
 
+# ── 네이버뉴스 검색 크롤링 (RSS 보강) ────────────────────────────────────────
+# 레퍼런스 채널(아트인컬처·디자인프레스 등) 취향에 가까운 후보를 RSS가 못 잡을 때 보강.
+# 인스타 채널 직접 크롤링은 로그인벽으로 비현실적 → 네이버뉴스 검색이 안정적 대안.
+NAVER_QUERIES = [
+    ("미술관 전시 개막", "네이버-전시"),
+    ("갤러리 개인전 개막", "네이버-개인전"),
+    ("거장 작가 별세 회고전", "네이버-거장"),
+    ("미술관 재개관 건축 완공", "네이버-건축"),
+    ("브랜드 아트 콜라보 팝업", "네이버-콜라보"),
+    ("아이돌 배우 전시 미술", "네이버-셀럽"),
+]
+
+
+def _naver_search_url(query: str) -> str:
+    # where=news, sort=1(최신순). 기간 필터는 우리 age 로직에 맡김.
+    return f"https://search.naver.com/search.naver?where=news&sort=1&query={quote(query)}"
+
+
+def _parse_korean_age(text: str) -> float:
+    """'3시간 전' / '2일 전' / '2026.06.13.' 같은 표기를 경과 시간(시간)으로."""
+    m = re.search(r"(\d+)\s*분\s*전", text)
+    if m:
+        return int(m.group(1)) / 60
+    m = re.search(r"(\d+)\s*시간\s*전", text)
+    if m:
+        return float(int(m.group(1)))
+    m = re.search(r"(\d+)\s*일\s*전", text)
+    if m:
+        return int(m.group(1)) * 24.0
+    m = re.search(r"(20\d{2})\.\s*(\d{1,2})\.\s*(\d{1,2})", text)
+    if m:
+        try:
+            d = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+            return max(0.0, (date.today() - d).days * 24.0)
+        except ValueError:
+            pass
+    return 999.0
+
+
+_NAVER_DATE_RE = re.compile(r"\d+\s*(?:분|시간|일)\s*전|20\d{2}\.\s*\d{1,2}\.\s*\d{1,2}")
+
+
+def _naver_item_age(anchor) -> float:
+    """뉴스 링크의 가장 가까운 조상 중 날짜 표기를 담은 블록을 찾아 경과 시간 반환.
+    날짜를 못 찾으면 999(→ 신선도 필터에서 탈락)."""
+    node = anchor
+    for _ in range(8):
+        node = getattr(node, "parent", None)
+        if node is None:
+            break
+        text = node.get_text(" ", strip=True)
+        if len(text) > 600:  # 블록이 커지면 다른 기사까지 섞임 → 중단
+            break
+        if _NAVER_DATE_RE.search(text):
+            return _parse_korean_age(text)
+    return 999.0
+
+
+def _is_naver_internal(host: str) -> bool:
+    return host.endswith("naver.com") or host.endswith("naver.me")
+
+
+def fetch_naver_news(query: str) -> list:
+    """네이버뉴스 검색결과 페이지를 curl_cffi로 받아 (제목·원문URL·경과시간) 추출.
+    구 레이아웃(a.news_tit)을 우선 쓰되, 신 레이아웃(해시 클래스 sds-comps)에서는
+    '외부 기사 링크 + 헤드라인 길이/한글' 휴리스틱으로 제목 앵커를 잡는다."""
+    r = http_get(_naver_search_url(query), timeout=15)
+    soup = BeautifulSoup(r.content, "html.parser")
+    items, seen = [], set()
+
+    # 1) 구 레이아웃
+    for a in soup.select("a.news_tit"):
+        title = (a.get("title") or a.get_text() or "").strip()
+        link = (a.get("href") or "").strip()
+        if title and link.startswith("http") and link not in seen:
+            seen.add(link)
+            items.append({"title": title, "url": link, "pub_raw": "", "age_pre": _naver_item_age(a)})
+    if items:
+        return items
+
+    # 2) 신 레이아웃 — 해시 클래스에 의존하지 않는 텍스트 휴리스틱
+    for a in soup.find_all("a"):
+        link = (a.get("href") or "").strip()
+        if not link.startswith("http"):
+            continue
+        if _is_naver_internal(urlparse(link).netloc.lower()):
+            continue  # 언론사 홈·네이버뉴스 미러 링크 제외 (원문 기사 앵커만)
+        title = a.get_text(" ", strip=True)
+        if len(title) < 12 or not re.search(r"[가-힣]", title):
+            continue  # 썸네일·언론사명 등 비제목 앵커 제거
+        if link in seen:
+            continue
+        seen.add(link)
+        items.append({"title": title, "url": link, "pub_raw": "", "age_pre": _naver_item_age(a)})
+    return items
+
+
 def item_age_hours(item: dict) -> float:
     """기사 발행 후 경과 시간 (시간 단위). 날짜 없으면 999 반환."""
     raw = item.get("pub_raw", "")
@@ -287,6 +384,30 @@ def pick_candidates(n: int = 3, max_age_hours: float = 36.0) -> list:
     return []
 
 
+def _collect_fresh(items, source_name, age_limit, skip_urls, seen_urls, all_fresh) -> int:
+    """후보 항목들을 필터·채점해 통과분을 all_fresh에 추가. 통과 건수 반환."""
+    kept = 0
+    for it in items:
+        if it["url"] in seen_urls or it["url"] in skip_urls:
+            continue
+        if not is_art_related(it["title"]) or is_blocked(it["url"]):
+            continue
+        # 네이버 크롤링 항목은 age를 미리 계산해 둠(age_pre), RSS는 pubDate로 계산.
+        age = it["age_pre"] if it.get("age_pre") is not None else item_age_hours(it)
+        if age > age_limit:
+            continue
+        score = curation_score(it["title"], age)
+        if score < MIN_SCORE:
+            continue
+        seen_urls.add(it["url"])
+        it["_source"] = source_name
+        it["_score"] = score
+        it["_age"] = age
+        all_fresh.append(it)
+        kept += 1
+    return kept
+
+
 def _pick_from_feeds(age_limit: float, skip_urls: set, noun_sets: list, max_pick: int = 3) -> list:
     all_fresh = []
     seen_urls = set()
@@ -297,25 +418,18 @@ def _pick_from_feeds(age_limit: float, skip_urls: set, noun_sets: list, max_pick
         except Exception as e:
             print(f"  [skip] fetch 실패: {e}", file=sys.stderr)
             continue
+        kept = _collect_fresh(items, source_name, age_limit, skip_urls, seen_urls, all_fresh)
+        print(f"  전체={len(items)} 통과={kept}건", file=sys.stderr)
 
-        kept = 0
-        for it in items:
-            if it["url"] in seen_urls or it["url"] in skip_urls:
-                continue
-            if not is_art_related(it["title"]) or is_blocked(it["url"]):
-                continue
-            age = item_age_hours(it)
-            if age > age_limit:
-                continue
-            score = curation_score(it["title"], age)
-            if score < MIN_SCORE:
-                continue
-            seen_urls.add(it["url"])
-            it["_source"] = source_name
-            it["_score"] = score
-            it["_age"] = age
-            all_fresh.append(it)
-            kept += 1
+    # 네이버뉴스 검색 크롤링 — 레퍼런스 채널 취향에 가까운 후보 보강.
+    for query, source_name in NAVER_QUERIES:
+        print(f"\n[네이버] {source_name} '{query}'", file=sys.stderr)
+        try:
+            items = fetch_naver_news(query)
+        except Exception as e:
+            print(f"  [skip] fetch 실패: {e}", file=sys.stderr)
+            continue
+        kept = _collect_fresh(items, source_name, age_limit, skip_urls, seen_urls, all_fresh)
         print(f"  전체={len(items)} 통과={kept}건", file=sys.stderr)
 
     if not all_fresh:
