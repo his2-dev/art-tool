@@ -339,28 +339,57 @@ def load_recent_published(days: int = 30):
         for cand in meta.get("candidates", []):
             if cand.get("url"):
                 published_urls.add(cand["url"])
-        nouns = extract_key_nouns(
+        sig = topic_signature(
             f"{meta.get('news_title', '')} {meta.get('headline1', '')} {meta.get('headline2', '')}"
         )
-        if nouns:
-            noun_sets.append(nouns)
+        if sig[0] or sig[1]:
+            noun_sets.append(sig)
     return published_urls, noun_sets
 
 
+_NOUN_STOP = {
+    "전시", "개막", "개관", "공개", "특별전", "기획전", "미술관", "갤러리",
+    "박물관", "예술", "미술", "작가", "아트", "서울", "한국", "오늘", "이번",
+}
+
+# 일반 미술·기사 상용어 — 고유명이 아니라서, 이 토큰만 겹친다고 '같은 기사'로
+# 보면 안 된다(서로 다른 비엔날레·서로 다른 회고전 등). 주제어 판정에서 제외.
+_GENERIC_TERMS = {
+    "현대미술", "비엔날레", "회고전", "특별전", "기획전", "아트페어", "미술관",
+    "박물관", "갤러리", "퍼포먼스", "설치미술", "개인전", "사진전", "프로젝트",
+    "페스티벌", "컬렉션", "디자인", "건축", "작품전", "인산인해", "전시회",
+    "오프닝", "도슨트", "큐레이터", "미디어아트", "아티스트", "프리뷰",
+}
+
+
 def extract_key_nouns(title: str) -> set:
-    """제목에서 핵심 고유명사 추출 (3자 이상 연속 한글/영문 단어)."""
+    """제목에서 일반 핵심명사 추출 (3자 이상 연속 한글/영문 단어, 불용어 제외)."""
     words = re.findall(r"[가-힣A-Za-z]{3,}", title)
-    stop = {
-        "전시", "개막", "개관", "공개", "특별전", "기획전", "미술관", "갤러리",
-        "박물관", "예술", "미술", "작가", "아트", "서울", "한국", "오늘", "이번",
-    }
-    return {w for w in words if w not in stop}
+    return {w for w in words if w not in _NOUN_STOP}
 
 
-def is_dup_topic(title: str, noun_sets: list) -> bool:
-    """발행 이력 또는 이번 세션의 다른 후보와 핵심 명사가 2개 이상 겹치면 중복."""
-    nouns = extract_key_nouns(title)
-    return any(len(nouns & s) >= 2 for s in noun_sets)
+def extract_subjects(title: str) -> set:
+    """식별성 높은 '주제어'(인물명·기관명 등 고유명) 추출 — 일반 상용어는 제외.
+    '호크니'처럼 한 기사를 특정하는 토큰. 하나만 겹쳐도 같은 사건으로 본다."""
+    return {w for w in extract_key_nouns(title) if w not in _GENERIC_TERMS}
+
+
+def topic_signature(title: str) -> tuple:
+    """중복 판정용 (일반명사 집합, 주제어 집합)."""
+    return (extract_key_nouns(title), extract_subjects(title))
+
+
+def is_dup_topic(title: str, signatures: list) -> bool:
+    """이미 채택/발행된 항목과 같은 주제인지.
+    - 일반 핵심명사가 2개 이상 겹치거나,
+    - 고유 주제어(인물·기관명)가 1개라도 겹치면 중복."""
+    nouns, subjects = topic_signature(title)
+    for prior_nouns, prior_subjects in signatures:
+        if len(nouns & prior_nouns) >= 2:
+            return True
+        if subjects & prior_subjects:
+            return True
+    return False
 
 
 def is_blocked(url: str) -> bool:
@@ -465,7 +494,7 @@ def _pick_from_feeds(age_limit: float, skip_urls: set, noun_sets: list, max_pick
             "source_name": _publisher_name(item["url"], item["_source"]),
             "age_hours": item["_age"],
         })
-        session_nouns.append(extract_key_nouns(item["title"]))
+        session_nouns.append(topic_signature(item["title"]))
         if len(results) >= max_pick:
             break
 
