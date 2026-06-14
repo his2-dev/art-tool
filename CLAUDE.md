@@ -41,12 +41,20 @@ MZ가 저장·공유하고 싶은 비주얼, 니치하지만 힙한 취향까지
 4. `image_url`은 아래 규칙의 허용 도메인으로 확정 후 진행
 
 ### 자동 모드 (스케줄 — 매일 12:00 KST)
-사용자 확인 없이 3건 전체 자동 진행. 파이프라인: `.claude/skills/daily-news/` (daily-news 스킬)
+사용자 확인 없이 3건 전체 자동 진행. 파이프라인: `.claude/skills/daily-news/` (daily-news 스킬).
+큐레이션 결과는 `claude/*` 작업 브랜치로 푸시되고, `discord-notify.yml`이 그 푸시에 트리거돼 Discord 전송.
 
 ### 폴백 자동 모드 (GitHub Actions — 매일 13:00 KST)
 `.github/workflows/daily-news.yml` + `tools/daily_auto.py`.
-당일 발행물(JSON)이 main에 이미 있으면 자동 스킵. RSS(검색 기반 Bing News + 언론사 피드)에서
-점수 기반 큐레이션(인터뷰·칼럼·연재 자동 제외) 후 3건 발행.
+**스킵 가드(중복 발행 방지)**: 당일 발행물이 main에 있거나 **오늘자 큐레이션이 `claude/*` 브랜치에
+이미 있으면** 자동 스킵 (12:00 스케줄이 이미 발행했으면 폴백은 거름).
+후보 수집은 **RSS(Bing News + 언론사) + 네이버뉴스 검색 크롤링**(`fetch_naver_news`, 해시 클래스
+비의존 휴리스틱). 점수 기반 큐레이션으로 3건 발행:
+- 인터뷰·칼럼·연재 자동 제외, 부동산·토목은 건축 키워드가 있어도 제외
+- **거장 별세**(미술계 인물 표지어 동반 시 가점) · **랜드마크 완공·재개관** · **미술관 파격 변신**
+  등 화제성 빅뉴스 가점
+- **중복 방지**: 주제어(고유명) 기반 dedup — 같은 인물·전시는 1건으로 합침
+  (`extract_subjects`/`topic_signature`/`is_dup_topic`)
 
 ---
 
@@ -169,5 +177,5 @@ python tools/news_poster.py \
 | 실행 시간 | 매일 12:00 KST |
 | 동작 | 뉴스 3건 선별 → 이미지 생성 → 커밋·푸시 → Discord 전송 |
 | 파이프라인 | `.claude/skills/daily-news/` (daily-news 스킬) |
-| 폴백 | GitHub Actions `daily-news.yml` 13:00 KST (당일 발행 있으면 스킵) |
+| 폴백 | GitHub Actions `daily-news.yml` 13:00 KST (당일 발행물이 main 또는 `claude/*` 브랜치에 있으면 스킵) |
 | 관리 | Claude Code 사이드바 → Scheduled |
