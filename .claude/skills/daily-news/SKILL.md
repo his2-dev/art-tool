@@ -20,19 +20,47 @@ description: p.art_mag 일일 뉴스 썸네일 3건 자동 발행 — 뉴스 큐
 
 ## STEP 0 — 발행 이력 확인 (가장 먼저)
 
+자동 발행 결과는 `claude/*` 작업 브랜치에만 쌓이고 main엔 머지되지 않는다. **main만 보면 어제
+자신이 뭘 발행했는지 모른 채 같은 전시를 또 고르게 되므로**, 최근 `claude/*` 브랜치까지 함께 읽는다.
+
 ```bash
-python3 -c "
-import json,glob
-from datetime import date,timedelta
-cutoff=(date.today()-timedelta(days=30)).isoformat()
-rows=[]
-for f in glob.glob('output/news/*.json'):
-    try: d=json.load(open(f,encoding='utf-8'))
-    except: continue
-    if str(d.get('published_at','2000-01-01'))[:10]<cutoff: continue
-    rows.append(f'{str(d.get(\"published_at\",\"\"))[:10]} | {d.get(\"headline1\",\"\")} {d.get(\"headline2\",\"\")} | {str(d.get(\"news_title\",\"\"))[:40]}')
-[print(r) for r in sorted(rows)]
-"
+git fetch -q origin '+refs/heads/claude/*:refs/remotes/origin/claude/*' || true
+python3 - <<'PY'
+import json, subprocess
+from datetime import date, timedelta
+cutoff = (date.today() - timedelta(days=30)).isoformat()
+
+def sh(args):
+    return subprocess.run(args, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace").stdout
+
+refs = ["origin/main"]
+branches = [b.strip() for b in sh(
+    ["git", "for-each-ref", "--sort=-committerdate",
+     "--format=%(refname:short)", "refs/remotes/origin/claude/"]).splitlines() if b.strip()]
+refs += branches[:40]   # 최근 40개 작업 브랜치까지
+
+seen, rows = set(), []
+for ref in refs:
+    for f in sh(["git", "-c", "core.quotepath=false", "ls-tree", "-r",
+                 "--name-only", ref, "output/news"]).splitlines():
+        if not f.endswith(".json"):
+            continue
+        try:
+            d = json.loads(sh(["git", "show", f"{ref}:{f}"]))
+        except Exception:
+            continue
+        if str(d.get("published_at", "2000-01-01"))[:10] < cutoff:
+            continue
+        line = (f'{str(d.get("published_at",""))[:10]} | '
+                f'{d.get("headline1","")} {d.get("headline2","")} | '
+                f'{str(d.get("news_title",""))[:40]}')
+        if line not in seen:
+            seen.add(line)
+            rows.append(line)
+for r in sorted(rows):
+    print(r)
+PY
 ```
 
 **규칙 (예외 없음)**: 목록의 작가명·전시명·기관명과 같거나 유사한 후보는 즉시 탈락.
