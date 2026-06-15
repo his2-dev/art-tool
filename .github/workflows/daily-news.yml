@@ -2,9 +2,11 @@ name: Daily News Auto
 
 on:
   schedule:
-    # KST 13:00 (UTC 04:00) — Claude 스케줄 태스크(12:00 KST)의 폴백.
-    # 당일 발행물이 이미 main에 있으면 스킵한다.
-    - cron: '0 4 * * *'
+    # KST 18:33 (UTC 09:33) — Claude 스케줄 태스크(17:07 KST)의 폴백.
+    # 반드시 프라이머리(17:07) '뒤'에 둬야 한다. 앞에 두면 폴백이 먼저 발행하고
+    # 프라이머리도 발행해 중복이 난다. 프라이머리가 오늘자 큐레이션을 이미
+    # main/claude/* 에 올렸으면 가드가 스킵한다.
+    - cron: '33 9 * * *'
   workflow_dispatch:
 
 permissions:
