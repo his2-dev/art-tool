@@ -114,6 +114,30 @@ python tools/news_poster.py \
 }
 ```
 
+## STEP 6.5 — URL 실재 검증 (FAIL이면 커밋 금지)
+
+**`news_url`·`image_url`은 검색에서 실제로 연 URL만. 절대 추측·조합하지 말 것.** 아래로 검증:
+
+```bash
+python3 - <<'PY'
+import json, glob, sys
+from datetime import date
+from tools.article_parser import http_get
+bad = 0
+for f in sorted(glob.glob(f"output/news/{date.today().isoformat()}_*.json")):
+    d = json.load(open(f, encoding="utf-8"))
+    for key in ("news_url", "image_url"):
+        u = d.get(key, "")
+        try: ok = http_get(u).status_code == 200
+        except Exception: ok = False
+        print(("OK  " if ok else "FAIL") + f" {key}: {u}")
+        bad += 0 if ok else 1
+sys.exit(1 if bad else 0)
+PY
+```
+
+FAIL이 하나라도 나오면 그 후보의 URL을 **실제 기사**로 교체(또는 후보 자체 교체)하고 재검증. 전부 OK여야 STEP 7.
+
 ## STEP 7 — 커밋 & 푸시 (CI가 Discord 전송)
 
 ```bash
