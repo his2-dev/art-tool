@@ -294,7 +294,11 @@ def generate_news_poster(
     if image_path and os.path.exists(image_path):
         bg = Image.open(image_path).convert("RGB")
     elif image_url:
-        bg = download_image(image_url)
+        try:
+            bg = download_image(image_url)
+        except Exception as e:
+            print(f"[배경] 이미지 다운로드 실패({e}) → 어두운 배경으로 대체 (CI가 image_url로 재생성)")
+            bg = None
 
     scale_value = float(scale)
     if bg is not None:
