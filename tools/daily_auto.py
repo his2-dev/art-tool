@@ -393,7 +393,7 @@ def is_dup_topic(title: str, signatures: list) -> bool:
 
 
 def is_blocked(url: str) -> bool:
-    host = urlparse(url).netloc.lower().lstrip("www.")
+    host = re.sub(r"^www\.", "", urlparse(url).netloc.lower())
     return any(host == b or host.endswith("." + b) for b in BLOCKED_DOMAINS)
 
 
@@ -526,7 +526,7 @@ def make_caption(title: str, source_name: str) -> str:
     clean = re.sub(r"\s+", " ", clean)
     return (
         f"{clean}\n\n"
-        f"#아트매거진 #문화예술 #전시추천 #현대미술 #전시소식"
+        f"#문화예술 #전시추천 #현대미술 #전시소식 #아트매거진"
     )
 
 

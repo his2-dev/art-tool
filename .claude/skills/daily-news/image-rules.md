@@ -9,7 +9,9 @@ CI는 curl_cffi Chrome 핑거프린트로 우회하지만, Actions IP 자체가 
 1. **직접 CDN 이미지 URL** (`.jpg`/`.png`/`.webp`로 끝나는 URL) — 항상 통과.
    기사 페이지에서 원본 이미지 주소를 직접 추출하는 것이 가장 확실. **가로 1000px 이상 권장**
 2. 한국 영문 매체: `koreaherald.com`, `koreajoongangdaily.joins.com`
-3. 국제 컬쳐/패션: `hypebeast.com`, `dezeen.com`, `wallpaper.com`, `vogue.com`, `architecturaldigest.com`
+3. 국제 컬쳐/패션·아트 전문: `hypebeast.com`, `dezeen.com`, `wallpaper.com`, `vogue.com`,
+   `architecturaldigest.com`, `artnet.com`, `artforum.com`, `ocula.com`, `designboom.com`,
+   `e-flux.com`, `eyesmag.com` — 동시대 미술 고화질 이미지가 풍부, image_url 1순위로 검색
 4. 갤러리 공식 영문: `kukjegallery.com`, `pkmgallery.com`, `lvmh.com`
 5. 국내 (간헐적 성공): `design.co.kr`, `mk.co.kr`, `chosun.com`, `joongang.co.kr`, `kmib.co.kr`
 
