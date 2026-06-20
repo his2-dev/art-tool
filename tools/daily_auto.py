@@ -11,6 +11,7 @@
 import json
 import os
 import re
+import subprocess
 import sys
 from datetime import date, datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
@@ -104,6 +105,8 @@ PENALTY_KEYWORDS = {
     "멘토": -6, "연재": -6, "부고": -6, "단신": -4,
     "모집": -5, "공모": -4, "강좌": -6, "교육": -4, "체험": -3,
     "할인": -3, "이벤트 당첨": -5, "포토뉴스": -4, "동정": -6,
+    # 상설·장기 진행 전시(퐁피두·키아프 류 evergreen) 감점 — 신선 트리거 가점으로 상쇄 가능.
+    "상설": -5, "상시": -4, "연중": -4, "스테디": -3,
 }
 
 # 연재·인터뷰 마커 — 발견 시 즉시 제외
@@ -312,8 +315,54 @@ def curation_score(title: str, age_hours: float) -> float:
 
 # ── 발행 이력 (중복 방지) ──────────────────────────────────────────────────────
 
+def _bad_news_url(url: str) -> bool:
+    """Discord 링크로 못 쓸 URL — 빈 값 또는 미해제 Bing 추적 링크."""
+    if not url:
+        return True
+    host = urlparse(url).netloc.lower()
+    return host.endswith("bing.com") or host == "bing.com"
+
+
+def _git(args: list) -> str:
+    return subprocess.run(["git", *args], capture_output=True, text=True,
+                          encoding="utf-8", errors="replace").stdout
+
+
+def _add_branch_history(published_urls: set, noun_sets: list, days: int) -> None:
+    """프라이머리(claude/* 브랜치)가 최근 발행한 큐레이션도 이력에 합친다.
+    폴백이 프라이머리와 같은 주제를 다시 내는 것을 막는다. git 불가 환경이면 조용히 패스."""
+    try:
+        subprocess.run(["git", "fetch", "-q", "origin",
+                        "+refs/heads/claude/*:refs/remotes/origin/claude/*"],
+                       capture_output=True, timeout=60)
+        branches = [b.strip() for b in _git(
+            ["for-each-ref", "--sort=-committerdate",
+             "--format=%(refname:short)", "refs/remotes/origin/claude/"]).splitlines() if b.strip()]
+    except Exception:
+        return
+    cutoff = (date.today() - timedelta(days=days)).isoformat()
+    for ref in branches[:40]:
+        for f in _git(["-c", "core.quotepath=false", "ls-tree", "-r",
+                       "--name-only", ref, "output/news"]).splitlines():
+            if not f.endswith(".json") or "_auto" in f:
+                continue
+            try:
+                meta = json.loads(_git(["show", f"{ref}:{f}"]))
+            except Exception:
+                continue
+            if str(meta.get("published_at", "2000-01-01"))[:10] < cutoff:
+                continue
+            if meta.get("news_url"):
+                published_urls.add(meta["news_url"])
+            sig = topic_signature(
+                f"{meta.get('news_title','')} {meta.get('headline1','')} {meta.get('headline2','')}")
+            if sig[0] or sig[1]:
+                noun_sets.append(sig)
+
+
 def load_recent_published(days: int = 30):
-    """최근 N일 발행 JSON에서 (URL 집합, 제목 핵심명사 집합 리스트) 반환."""
+    """최근 N일 발행 JSON에서 (URL 집합, 제목 핵심명사 집합 리스트) 반환.
+    main의 폴백 발행분 + 프라이머리(claude/*)의 큐레이션 발행분을 모두 포함한다."""
     published_urls = set()
     noun_sets = []
     output_dir = os.path.join(ROOT, "output", "news")
@@ -344,6 +393,7 @@ def load_recent_published(days: int = 30):
         )
         if sig[0] or sig[1]:
             noun_sets.append(sig)
+    _add_branch_history(published_urls, noun_sets, days)
     return published_urls, noun_sets
 
 
@@ -419,7 +469,7 @@ def _collect_fresh(items, source_name, age_limit, skip_urls, seen_urls, all_fres
     for it in items:
         if it["url"] in seen_urls or it["url"] in skip_urls:
             continue
-        if not is_art_related(it["title"]) or is_blocked(it["url"]):
+        if not is_art_related(it["title"]) or is_blocked(it["url"]) or _bad_news_url(it["url"]):
             continue
         # 네이버 크롤링 항목은 age를 미리 계산해 둠(age_pre), RSS는 pubDate로 계산.
         age = it["age_pre"] if it.get("age_pre") is not None else item_age_hours(it)
