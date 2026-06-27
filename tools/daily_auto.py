@@ -449,7 +449,7 @@ def is_blocked(url: str) -> bool:
 
 # ── 후보 선별 ─────────────────────────────────────────────────────────────────
 
-def pick_candidates(n: int = 3, max_age_hours: float = 36.0) -> list:
+def pick_candidates(n: int = 2, max_age_hours: float = 36.0) -> list:
     """점수 상위 + 이미지 검증 통과한 후보 n개 반환. 부족하면 72h로 완화."""
     skip_urls, noun_sets = load_recent_published(days=30)
     print(f"[중복제외] 최근 30일 발행 {len(noun_sets)}건 로드", file=sys.stderr)
@@ -586,7 +586,7 @@ def main() -> int:
     from tools.discord_sender import send_news_to_discord
     from tools.news_poster import generate_news_poster
 
-    candidates = pick_candidates(n=3)
+    candidates = pick_candidates(n=2)
     if not candidates:
         print("[오류] 후보 없음 — Discord 전송 생략", file=sys.stderr)
         return 3

@@ -1,11 +1,11 @@
 ---
 name: daily-news
-description: p.art_mag 일일 뉴스 썸네일 3건 자동 발행 — 뉴스 큐레이션부터 썸네일 생성, JSON 저장, 커밋·푸시, 완료 보고까지. 스케줄 태스크 또는 "뉴스 발행해줘" 요청 시 사용.
+description: p.art_mag 일일 뉴스 썸네일 2건 자동 발행 — 뉴스 큐레이션부터 썸네일 생성, JSON 저장, 커밋·푸시, 완료 보고까지. 스케줄 태스크 또는 "뉴스 발행해줘" 요청 시 사용.
 ---
 
 # p.art_mag 일일 뉴스 발행 파이프라인
 
-오늘의 문화예술 뉴스 3건 선별 → 썸네일 3개 생성 → 커밋·푸시(CI가 Discord 전송) → 완료 보고.
+오늘의 문화예술 뉴스 2건 선별 → 썸네일 2개 생성 → 커밋·푸시(CI가 Discord 전송) → 완료 보고.
 **사용자 확인 단계 없음. 끝까지 혼자 진행.**
 
 각 단계에서 지정된 보조 문서를 **그 단계 시작 전에 반드시 읽을 것**:
@@ -75,16 +75,16 @@ python3 -c "from datetime import date; d=date.today(); print(d.isoformat(), f'{d
 
 ## STEP 2 — 후보 수집·선별 → `curation.md` 읽고 진행
 
-10건 이상 수집 → 점수 평가 → 서로 다른 카테고리 3건 확정.
+6건 이상 수집 → 점수 평가 → 서로 다른 카테고리 2건 확정.
 **그중 1건은 반드시 '트렌드 슬롯'** (이번 주 화제·이슈, b.framemag·artart.today 감성 — curation.md 참고).
 
 ## STEP 3 — image_url 확정 → `image-rules.md` 읽고 진행
 
-3건 모두 허용 출처에서 이미지 확보 (가로 800px 이상 확인). 미달이면 후보 교체.
+2건 모두 허용 출처에서 이미지 확보 (가로 800px 이상 확인). 미달이면 후보 교체.
 
 ## STEP 4 — 헤드라인·캡션 작성 → `headline-caption.md` 읽고 진행
 
-## STEP 5 — 이미지 생성 (3건 순차)
+## STEP 5 — 이미지 생성 (2건 순차)
 
 ```bash
 python tools/news_poster.py \
@@ -98,7 +98,7 @@ python tools/news_poster.py \
 > 로컬에서 403으로 어두운 배경이 떠도 정상 — CI가 image_url로 재생성한다.
 > "블러 배경 적용" 로그가 보이면 더 큰 원본 이미지를 찾아 재생성 시도 (블러는 최후 수단).
 
-## STEP 6 — 메타 JSON 저장 (3건 각각)
+## STEP 6 — 메타 JSON 저장 (2건 각각)
 
 `output/news/YYYY-MM-DD_키워드_N.json`:
 
@@ -111,7 +111,7 @@ python tools/news_poster.py \
   "source": "© 원저작권자",
   "caption": "캡션 #태그1 #태그2 #태그3 #태그4 #아트매거진",
   "published_at": "YYYY-MM-DD",
-  "candidates": [{"title":"","url":""},{"title":"","url":""},{"title":"","url":""}]
+  "candidates": [{"title":"","url":""},{"title":"","url":""}]
 }
 ```
 
@@ -143,7 +143,7 @@ FAIL이 하나라도 나오면 그 후보의 URL을 **실제 기사**로 교체(
 
 ```bash
 git add output/news/YYYY-MM-DD_*.png output/news/YYYY-MM-DD_*.json
-git commit -m "feat(news): YYYY-MM-DD 일일 뉴스 썸네일 3건"
+git commit -m "feat(news): YYYY-MM-DD 일일 뉴스 썸네일 2건"
 git push -u origin HEAD
 ```
 
@@ -155,7 +155,7 @@ git push -u origin HEAD
 [1] 제목 | 헤드라인: "1줄"/"2줄" | 이미지: 해상도/블러 여부
 캡션: (전문)
 
-[2] ... / [3] ...
+[2] ...
 
 ❌ 제외: [제목] — 사유 (이력 중복 / 점수 미달 / 이미지 화질 미달 등)
 ```
