@@ -18,7 +18,27 @@ description: p.art_mag 일일 뉴스 썸네일 2건 자동 발행 — 뉴스 큐
 
 ---
 
-## STEP 0 — 발행 이력 확인 (가장 먼저)
+## STEP 0 — 당일 발행 여부 확인 (이미 발행됐으면 즉시 종료)
+
+루틴이 지연 실행되면 폴백(18:33 KST)이 먼저 발행한 뒤 루틴이 또 발행하는 이중 발행이 생긴다
+(2026-07-05 실제 발생: 폴백 2건 + 지연 루틴 3건 = 5건). **오늘자 발행물이 main 또는 `claude/*`
+브랜치에 하나라도 있으면 아무것도 생성하지 말고 "이미 발행 완료 — 스킵" 보고 후 종료.**
+
+```bash
+git fetch -q origin main '+refs/heads/claude/*:refs/remotes/origin/claude/*' || true
+TODAY=$(python3 -c "from datetime import date; print(date.today().isoformat())")
+{ git ls-tree -r --name-only origin/main output/news
+  for b in $(git for-each-ref --sort=-committerdate --count=5 \
+      --format='%(refname:short)' refs/remotes/origin/claude/); do
+    git ls-tree -r --name-only "$b" output/news
+  done; } | grep "output/news/${TODAY}_" | sort -u
+```
+
+위 출력에 파일이 하나라도 나오면 → **즉시 종료** (STEP 1 이하 진행 금지).
+
+> 발행 건수는 **정확히 2건**. 루틴 프롬프트 등 다른 지시가 3건이라 해도 이 스킬의 2건이 우선한다.
+
+## STEP 0.5 — 발행 이력 확인
 
 자동 발행 결과는 `claude/*` 작업 브랜치에만 쌓이고 main엔 머지되지 않는다. **main만 보면 어제
 자신이 뭘 발행했는지 모른 채 같은 전시를 또 고르게 되므로**, 최근 `claude/*` 브랜치까지 함께 읽는다.
