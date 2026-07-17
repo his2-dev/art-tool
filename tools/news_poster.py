@@ -80,6 +80,11 @@ LOW_RES_BLUR_THRESHOLD = 2.4
 HEADLINE1_Y = 935
 HEADLINE2_Y = 1055
 
+# 헤드라인 드롭섀도우 (Figma: X 0 / Y 0 / Blur 20.67 / Spread 0 / #000000 50%)
+TEXT_SHADOW_OFFSET = (0, 0)
+TEXT_SHADOW_BLUR = 20.67  # Figma blur 값 (CSS blur-radius와 동일 기준, sigma는 절반)
+TEXT_SHADOW_ALPHA = 128   # 50%
+
 SOURCE_RIGHT_MARGIN = 72
 SOURCE_Y = 1261
 
@@ -170,11 +175,27 @@ def draw_gradient_shadow(canvas: Image.Image, canvas_w: int, canvas_h: int):
     canvas.paste(composited, (0, shadow_y))
 
 
-def draw_headline(draw: ImageDraw.Draw, text: str, y: int, font: ImageFont.FreeTypeFont, canvas_w: int):
-    """중앙 정렬 헤드라인 렌더링."""
-    bbox = draw.textbbox((0, 0), text, font=font)
+def draw_headline(canvas: Image.Image, text: str, y: int, font: ImageFont.FreeTypeFont, canvas_w: int, scale: float = 1.0):
+    """중앙 정렬 헤드라인 렌더링 (Figma 드롭섀도우 포함)."""
+    measure = ImageDraw.Draw(canvas)
+    bbox = measure.textbbox((0, 0), text, font=font)
     text_w = bbox[2] - bbox[0]
     x = (canvas_w - text_w) // 2
+
+    # 섀도우: 별도 레이어에 그려 가우시안 블러 후 합성 (sigma = blur/2)
+    shadow = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    shadow_draw = ImageDraw.Draw(shadow)
+    shadow_draw.text(
+        (x + TEXT_SHADOW_OFFSET[0] * scale, y + TEXT_SHADOW_OFFSET[1] * scale),
+        text,
+        fill=(0, 0, 0, TEXT_SHADOW_ALPHA),
+        font=font,
+    )
+    shadow = shadow.filter(ImageFilter.GaussianBlur(radius=TEXT_SHADOW_BLUR * scale / 2))
+    composited = Image.alpha_composite(canvas.convert("RGBA"), shadow)
+    canvas.paste(composited.convert(canvas.mode))
+
+    draw = ImageDraw.Draw(canvas)
     draw.text((x, y), text, fill=(255, 255, 255), font=font)
 
 
@@ -366,11 +387,11 @@ def generate_news_poster(
         except OSError:
             print("[경고] Clash Display 폰트 없음, 뱃지 생략")
 
-    draw = ImageDraw.Draw(canvas_rgb)
+    # 6. 헤드라인 (드롭섀도우 포함)
+    draw_headline(canvas_rgb, headline1, headline1_y, font_headline, canvas_w, scale=scale_value)
+    draw_headline(canvas_rgb, headline2, headline2_y, font_headline, canvas_w, scale=scale_value)
 
-    # 6. 헤드라인
-    draw_headline(draw, headline1, headline1_y, font_headline, canvas_w)
-    draw_headline(draw, headline2, headline2_y, font_headline, canvas_w)
+    draw = ImageDraw.Draw(canvas_rgb)
 
     # 7. 출처
     draw_source(draw, source, font_source, canvas_w, source_right_margin, source_y)
