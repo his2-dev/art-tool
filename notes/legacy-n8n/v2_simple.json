@@ -1,0 +1,241 @@
+{
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1600,
+        -800
+      ],
+      "id": "trigger",
+      "name": "Manual Trigger"
+    },
+    {
+      "parameters": {
+        "url": "https://www.arthub.co.kr/sub06/board01_list.htm?Sub_No=2&page=1&key_type=",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1400,
+        -800
+      ],
+      "id": "fetch_news_list",
+      "name": "뉴스 목록 수집"
+    },
+    {
+      "parameters": {
+        "jsCode": "// HTML에서 뉴스 항목 추출 및 파싱을 한 번에 처리\nconst html = $json.data;\nconst results = [];\n\n// 뉴스 항목을 찾는 정규식 패턴\nconst newsPattern = /<a class=\"lis\"[^>]*href=\"[^\"]*Homepage=([^\"&]*)\"[^>]*>([^<]*)<\\/a>[\\s\\S]*?<td[^>]*align=\"center\"[^>]*>([\\d.]+)<\\/td>/gi;\n\nlet match;\nwhile ((match = newsPattern.exec(html)) !== null && results.length < 5) {\n  const url = decodeURIComponent(match[1]);\n  const fullText = match[2].trim();\n  \n  // 제목과 신문사 분리\n  const parts = fullText.split('::');\n  if (parts.length >= 2) {\n    const title = parts[0].trim();\n    const publisher = parts[1].trim();\n    const date = match[3];\n    \n    results.push({\n      title,\n      publisher,\n      url,\n      date\n    });\n  }\n}\n\nreturn results.map(item => ({ json: item }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1200,
+        -800
+      ],
+      "id": "parse_news",
+      "name": "뉴스 파싱"
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -1000,
+        -800
+      ],
+      "id": "process_each_news",
+      "name": "뉴스별 처리"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {
+          "timeout": 20000,
+          "redirect": {
+            "redirect": {}
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -800,
+        -800
+      ],
+      "id": "fetch_article",
+      "name": "기사 본문 수집"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 기사 본문에서 텍스트 추출 및 요약 생성\nconst html = $json.data;\nconst newsData = $('process_each_news').item.json;\n\n// HTML 태그 제거 및 본문 추출\nfunction extractMainContent(html) {\n  // 스크립트, 스타일, 광고 관련 태그 제거\n  let cleaned = html\n    .replace(/<script[\\s\\S]*?<\\/script>/gi, '')\n    .replace(/<style[\\s\\S]*?<\\/style>/gi, '')\n    .replace(/<!--[\\s\\S]*?-->/g, '')\n    .replace(/<\\/?(?:nav|header|footer|aside|menu|advertisement)[^>]*>/gi, '');\n  \n  // HTML 태그 제거하고 텍스트만 추출\n  cleaned = cleaned.replace(/<[^>]+>/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .replace(/&[a-zA-Z0-9#]+;/g, ' ')\n    .trim();\n  \n  // 본문으로 보이는 부분 추출 (긴 문단 우선)\n  const sentences = cleaned.split(/[.!?]\\s+/).filter(s => s.length > 20);\n  return sentences.slice(0, 5).join('. ').substring(0, 500);\n}\n\nconst mainContent = extractMainContent(html);\n\n// 간단한 요약 생성 (첫 2-3 문장)\nconst summary = mainContent.split(/[.!?]\\s+/)\n  .filter(s => s.length > 10)\n  .slice(0, 2)\n  .join('. ')\n  .substring(0, 100) + (mainContent.length > 100 ? '...' : '');\n\nreturn [{\n  json: {\n    ...newsData,\n    summary: summary || newsData.title.substring(0, 50) + '...'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -600,
+        -800
+      ],
+      "id": "create_summary",
+      "name": "요약 생성"
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "destinationFieldName": "articles",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        -400,
+        -800
+      ],
+      "id": "collect_all",
+      "name": "전체 수집"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 디스코드 메시지 포맷팅\nconst articles = $json.articles;\nconst today = new Date().toLocaleDateString('ko-KR', { \n  year: 'numeric', \n  month: 'long', \n  day: 'numeric' \n});\n\nlet message = `🎨 **${today} 문화·예술 뉴스**\\n오늘의 문화·예술 소식을 전해드립니다!\\n\\n`;\n\nconst emojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣'];\n\narticles.forEach((article, index) => {\n  if (index < 5) {\n    message += `**${emojis[index]} [${article.title}](${article.url})**\\n`;\n    message += `> ${article.summary}\\n`;\n    message += `📰 ${article.publisher} | 📅 ${article.date}\\n\\n`;\n  }\n});\n\nreturn [{ json: { content: message } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -200,
+        -800
+      ],
+      "id": "format_message",
+      "name": "메시지 포맷팅"
+    },
+    {
+      "parameters": {
+        "authentication": "webhook",
+        "content": "={{ $json.content }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.discordTool",
+      "typeVersion": 2,
+      "position": [
+        0,
+        -800
+      ],
+      "id": "send_discord",
+      "name": "Discord 전송",
+      "webhookId": "98a05fa5-1b70-4fde-8987-189162a2adb4",
+      "credentials": {
+        "discordWebhookApi": {
+          "id": "Shx6REPZISIMuV2R",
+          "name": "Discord Bot account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "뉴스 목록 수집",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "뉴스 목록 수집": {
+      "main": [
+        [
+          {
+            "node": "뉴스 파싱",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "뉴스 파싱": {
+      "main": [
+        [
+          {
+            "node": "뉴스별 처리",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "뉴스별 처리": {
+      "main": [
+        [
+          {
+            "node": "전체 수집",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "기사 본문 수집",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "기사 본문 수집": {
+      "main": [
+        [
+          {
+            "node": "요약 생성",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "요약 생성": {
+      "main": [
+        [
+          {
+            "node": "뉴스별 처리",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "전체 수집": {
+      "main": [
+        [
+          {
+            "node": "메시지 포맷팅",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "메시지 포맷팅": {
+      "main": [
+        [
+          {
+            "node": "Discord 전송",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

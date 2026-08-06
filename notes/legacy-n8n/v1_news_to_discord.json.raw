@@ -1,0 +1,108 @@
+{
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-1488, -400],
+      "id": "d17ada87-6c8f-4b3d-b5fc-778775ea2dc7",
+      "name": "When clicking 'Execute workflow'"
+    },
+    {
+      "parameters": {
+        "url": "https://www.arthub.co.kr/sub06/board01_list.htm?Sub_No=2&page=1&key_type=",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-1280, -400],
+      "id": "c405ba3d-1264-49d9-af28-bedce29b9da3",
+      "name": "Fetch News List"
+    },
+    {
+      "parameters": {
+        "jsCode": "// HTML에서 뉴스 블록 추출 (정규식 개선)\nconst html = $json[\"data\"];\n\n// 더 정확한 패턴으로 뉴스 항목 추출\nconst newsPattern = /<tr[^>]*>\\s*<td[^>]*align=\"center\"[^>]*>\\s*\\d+[\\s\\S]*?<\\/tr>/gi;\nconst matches = html.match(newsPattern) || [];\n\nconsole.log(`Found ${matches.length} news items`);\n\nif (matches.length === 0) {\n  console.warn('No news items found in HTML');\n  return [];\n}\n\nreturn matches.slice(0, 10).map((block, index) => ({ \n  json: { \n    html: block.trim(),\n    index: index + 1\n  } \n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-1088, -400],
+      "id": "9668ced6-dd00-46ac-98be-b8c04141a2df",
+      "name": "Extract News Blocks"
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [-880, -400],
+      "id": "0ea50076-875e-4c7b-80e6-f7ae15785513",
+      "name": "Aggregate HTML"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "HTML 테이블에서 뉴스 정보를 추출하여 JSON 배열로 반환하세요.\n\n**추출 규칙:**\n1. <a class=\"lis\"> 태그에서 제목과 신문사 추출 (\"::\"로 구분)\n2. href=\"Homepage=실제URL\" 패턴에서 실제 URL 추출  \n3. 날짜는 해당 <tr>의 마지막 <td>에서 추출\n4. 최대 5개 항목만 추출\n\n**출력 형식:**\n```json\n[\n  {\n    \"title\": \"뉴스 제목\",\n    \"publisher\": \"신문사\", \n    \"url\": \"실제 뉴스 URL\",\n    \"date\": \"YY.MM.DD\"\n  }\n]\n```\n\n**중요:** 순수 JSON 배열만 출력하세요.\n\nHTML 데이터:\n{{ $json }}",
+        "options": {
+          "systemMessage": "HTML 파싱 전문가입니다. 정확한 JSON 배열만 출력하며, 불필요한 텍스트는 절대 포함하지 않습니다."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.1,
+      "position": [-688, -400],
+      "id": "41261fb7-a76b-449a-8601-b025653a0e2d",
+      "name": "Parse News Data"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4o-mini"
+        },
+        "options": {
+          "temperature": 0.1
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [-736, -240],
+      "id": "1df90454-ba4f-4db3-991e-051376736aa3",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "3FuIFmR3Yx4zuavb",
+          "name": "OpenAi-n8n-test"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"array\",\n  \"items\": {\n    \"type\": \"object\",\n    \"properties\": {\n      \"title\": {\"type\": \"string\"},\n      \"publisher\": {\"type\": \"string\"},\n      \"url\": {\"type\": \"string\", \"format\": \"uri\"},\n      \"date\": {\"type\": \"string\", \"pattern\": \"^\\\\d{2}\\\\.\\\\d{2}\\\\.\\\\d{2}$\"}\n    },\n    \"required\": [\"title\", \"publisher\", \"url\", \"date\"]\n  },\n  \"maxItems\": 5\n}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [-432, -224],
+      "id": "ad09d041-16ea-4627-aca9-91411c002d66",
+      "name": "Structured Parser"
+    },
+    {
+      "parameters": {
+        "jsCode": "// AI Agent 출력에서 JSON 배열 추출\nconst input = $input.first().json;\nlet newsArray;\n\nif (input && input.output) {\n  try {\n    newsArray = JSON.parse(input.output);\n  } catch (e) {\n    console.error('JSON parsing failed:', e);\n    throw new Error('Invalid JSON from AI Agent');\n  }\n} else if (Array.isArray(input)) {\n  newsArray = input;\n} else {\n  throw new Error('Unexpected AI Agent output format');\n}\n\nif (!Array.isArray(newsArray) || newsArray.length === 0) {\n  throw new Error('No news data found');\n}\n\n// 최대 5개로 제한하고 개별 항목으로 분리\nreturn newsArray.slice(0, 5).map((news, index) => {\n  console.log(`Processing news ${index + 1}: ${news.title}`);\n  return { json: news };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-336, -400],
+      "id": "process-news-array",
+      "name": "Process News Array"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {
+          "timeout": 20000,
+          "retry": {\n            \"enabled\": true,\n            \"maxTries\": 2\n          }\n        }\n      },\n      "type": "n8n-nodes-base.httpRequest",\n      "typeVersion": 4.2,\n      "position": [-176, -400],\n      "id": "64d59527-cf35-45a7-804e-89ee1058d9c3",\n      "name": "Fetch Article Content"\n    },\n    {\n      "parameters": {\n        "modelId": {\n          "__rl": true,\n          "value": "gpt-4o-mini",\n          "mode": "list"\n        },\n        "messages": {\n          "values": [\n            {\n              "content": "다음 HTML에서 기사 본문만 추출하여 50-100자로 요약하세요.\\n\\n**규칙:**\\n- 광고, 메뉴, 스크립트, 저작권 내용 제외\\n- 기사 핵심 내용만 간결하게\\n- 불필요한 수식어 제거\\n\\n**출력 형식:**\\n```json\\n{\\n  \\\"title\\\": \\\"{{ $('Process News Array').item.json.title }}\\\",\\n  \\\"summary\\\": \\\"<요약>\\\",\\n  \\\"publisher\\\": \\\"{{ $('Process News Array').item.json.publisher }}\\\",\\n  \\\"date\\\": \\\"{{ $('Process News Array').item.json.date }}\\\",\\n  \\\"url\\\": \\\"{{ $('Process News Array').item.json.url }}\\\"\\n}\\n```\\n\\nHTML:\\n{{ $json.data }}"\n            }\n          ]\n        },\n        "jsonOutput": true,\n        "options": {\n          "temperature": 0.3\n        }\n      },\n      "type": "@n8n/n8n-nodes-langchain.openAi",\n      "typeVersion": 1.8,\n      "position": [0, -400],\n      "id": "3368674c-6b96-4b7e-9ef7-d9eedac6416c",\n      "name": "Summarize Article",\n      "credentials": {\n        "openAiApi": {\n          "id": "3FuIFmR3Yx4zuavb",\n          "name": "OpenAi-n8n-test"\n        }\n      }\n    },\n    {\n      "parameters": {\n        "jsCode": "// 각 기사 요약 결과를 정리\\nconst summary = $json.message?.content || $json;\\n\\n// 필수 필드 확인 및 정리\\nconst cleanedData = {\\n  title: summary.title || 'Unknown Title',\\n  summary: summary.summary || 'Summary not available',\\n  publisher: summary.publisher || 'Unknown Publisher',\\n  date: summary.date || 'Unknown Date',\\n  url: summary.url || '#'\\n};\\n\\nconsole.log('Processed article:', cleanedData.title);\\n\\nreturn [{ json: cleanedData }];"\n      },\n      "type": "n8n-nodes-base.code",\n      "typeVersion": 2,\n      "position": [176, -400],\n      "id": "clean-summary-data",\n      "name": "Clean Summary Data"\n    },\n    {\n      "parameters": {\n        "aggregate": \"aggregateAllItemData\",\n        "options": {}\n      },\n      "type": "n8n-nodes-base.aggregate",\n      "typeVersion": 1,\n      "position": [352, -400],\n      "id": "5d9385c8-cc05-4146-a6c2-b814f1911359",\n      "name": "Collect All Summaries"\n    },\n    {\n      "parameters": {\n        "jsCode": "// 디스코드 메시지 생성\\nconst articles = $input.all().map(item => item.json);\\nconst today = new Date().toLocaleDateString('ko-KR', { \\n  year: 'numeric', \\n  month: 'long', \\n  day: 'numeric' \\n});\\n\\nif (articles.length === 0) {\\n  return [{ json: { message: '오늘은 수집된 뉴스가 없습니다.' } }];\\n}\\n\\nlet message = `🎨 **${today} 문화·예술 뉴스**\\n`;\\nmessage += `오늘의 문화·예술 소식을 전해드립니다!\\n\\n`;\\n\\nconst numberEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣'];\\n\\narticles.forEach((article, index) => {\\n  const emoji = numberEmojis[index] || `${index + 1}️⃣`;\\n  message += `**${emoji} [${article.title}](${article.url})**\\n`;\\n  message += `> ${article.summary}\\n`;\\n  message += `📰 ${article.publisher} | 📅 ${article.date}\\n\\n`;\\n});\\n\\nmessage += `---\\n📊 총 ${articles.length}개의 뉴스를 수집했습니다.`;\\n\\nconsole.log('Generated Discord message length:', message.length);\\n\\nreturn [{ json: { message } }];"\n      },\n      "type": "n8n-nodes-base.code",\n      "typeVersion": 2,\n      "position": [528, -400],\n      "id": "generate-discord-message",\n      "name": "Generate Discord Message"\n    },\n    {\n      "parameters": {\n        "authentication": "webhook",\n        "content": "={{ $json.message }}",\n        "options": {}\n      },\n      "type": "n8n-nodes-base.discord",\n      "typeVersion": 2,\n      "position": [704, -400],\n      "id": "cc48c1e0-bb6f-4ccf-bcdc-6d8c02f58450",\n      "name": "Send to Discord",\n      "webhookId": "98a05fa5-1b70-4fde-8987-189162a2adb4",\n      "credentials": {\n        "discordWebhookApi": {\n          "id": "Shx6REPZISIMuV2R",\n          "name": "Discord Bot account"\n        }\n      }\n    },\n    {\n      "parameters": {\n        "jsCode": "// 에러 발생 시 알림 메시지\\nconst errorMessage = `❌ **뉴스 수집 실패**\\n${new Date().toLocaleString('ko-KR')}에 문화예술 뉴스 수집 중 오류가 발생했습니다.\\n\\n관리자에게 문의해주세요.`;\\n\\nreturn [{ json: { message: errorMessage } }];"\n      },\n      "type": "n8n-nodes-base.code",\n      "typeVersion": 2,\n      "position": [704, -240],\n      "id": "error-handler",\n      "name": "Error Handler"\n    }\n  ],\n  "connections": {\n    "When clicking 'Execute workflow'": {\n      "main": [[\n        {"node": "Fetch News List", "type": "main", "index": 0}\n      ]]\n    },\n    "Fetch News List": {\n      "main": [[\n        {"node": "Extract News Blocks", "type": "main", "index": 0}\n      ]]\n    },\n    "Extract News Blocks": {\n      "main": [[\n        {"node": "Aggregate HTML", "type": "main", "index": 0}\n      ]]\n    },\n    "Aggregate HTML": {\n      "main": [[\n        {"node": "Parse News Data", "type": "main", "index": 0}\n      ]]\n    },\n    "Parse News Data": {\n      "main": [[\n        {"node": "Process News Array", "type": "main", "index": 0}\n      ]]\n    },\n    "Process News Array": {\n      "main": [[\n        {"node": "Fetch Article Content", "type": "main", "index": 0}\n      ]]\n    },\n    "Fetch Article Content": {\n      "main": [[\n        {"node": "Summarize Article", "type": "main", "index": 0}\n      ]]\n    },\n    "Summarize Article": {\n      "main": [[\n        {"node": "Clean Summary Data", "type": "main", "index": 0}\n      ]]\n    },\n    "Clean Summary Data": {\n      "main": [[\n        {"node": "Collect All Summaries", "type": "main", "index": 0}\n      ]]\n    },\n    "Collect All Summaries": {\n      "main": [[\n        {"node": "Generate Discord Message", "type": "main", "index": 0}\n      ]]\n    },\n    "Generate Discord Message": {\n      "main": [[\n        {"node": "Send to Discord", "type": "main", "index": 0}\n      ]]\n    },\n    "OpenAI Chat Model": {\n      "ai_languageModel": [[\n        {"node": "Parse News Data", "type": "ai_languageModel", "index": 0}\n      ]]\n    },\n    "Structured Parser": {\n      "ai_outputParser": [[\n        {"node": "Parse News Data", "type": "ai_outputParser", "index": 0}\n      ]]\n    }\n  }\n}

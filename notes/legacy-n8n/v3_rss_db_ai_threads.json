@@ -1,0 +1,1070 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "triggerTimes": {
+          "item": [
+            {
+              "hour": 7
+            }
+          ]
+        }
+      },
+      "id": "daily-rss-trigger",
+      "name": "매일 오전 RSS 수집",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        -4640,
+        560
+      ]
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -4736,
+        1200
+      ],
+      "id": "manual-trigger",
+      "name": "수동 실행 트리거"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "{\n  \"feeds\": [\n    \"https://www.yna.co.kr/rss/culture.xml\",\n    \"https://www.newsis.com/RSS/culture.xml\",\n    \"https://www.hankyung.com/feed/life\",\n    \"http://rss.edaily.co.kr/edaily_news.xml\"\n  ]\n}"
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -4416,
+        560
+      ],
+      "id": "rss-feeds-config",
+      "name": "RSS 피드 설정"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "feeds"
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        -4192,
+        560
+      ],
+      "id": "split-feeds",
+      "name": "피드 분할"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.feeds }}"
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        -3920,
+        560
+      ],
+      "id": "rss-reader",
+      "name": "RSS 읽기"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 키워드 기반 필터링 및 최적화된 뉴스 선별\nconst items = $input.all();\n\nconst excludeKeywords = [\n  '부고', '인사', '공지', '모집', '채용', '입찰', \n  '알림', '안내', '변경', '연기', '취소',\n  '날씨', '교통', '부동산', '주식'\n];\n\nconst priorityKeywords = [\n  '전시', '공연', '콘서트', '뮤지컬', '연극', '영화', '오페라', '발레', '무용',\n  '리사이탈', '갈라', '쇼케이스', '프리미어', '초연', '재공연',\n  '축제', '페스티벌', '개막', '폐막', '시상', '어워드', '공모전', '비엔날레',\n  '예술의전당', '국립', '세종문화회관', 'K-컬처', '한류', '문화예술'\n];\n\n// 필터링 및 점수 계산\nconst processedItems = items\n  .filter(item => {\n    const title = (item.json.title || '').toLowerCase();\n    return !excludeKeywords.some(keyword => title.includes(keyword.toLowerCase()));\n  })\n  .map(item => {\n    const title = item.json.title.toLowerCase();\n    const priorityScore = priorityKeywords.filter(keyword => \n      title.includes(keyword.toLowerCase())\n    ).length;\n    \n    return {\n      json: {\n        title: item.json.title,\n        link: item.json.link,\n        pubDate: item.json.pubDate,\n        content: item.json.contentSnippet || item.json.content || '',\n        priorityScore,\n        // 중복 제거를 위한 해시 생성\n        titleHash: item.json.title.replace(/[^가-힣a-zA-Z0-9]/g, '').substring(0, 50)\n      }\n    };\n  })\n  .sort((a, b) => b.json.priorityScore - a.json.priorityScore)\n  .slice(0, 30); // 상위 30개만 선택\n\n// 중복 제거 (제목 기반)\nconst uniqueItems = [];\nconst seenTitles = new Set();\n\nfor (const item of processedItems) {\n  if (!seenTitles.has(item.json.titleHash)) {\n    seenTitles.add(item.json.titleHash);\n    uniqueItems.push(item);\n    if (uniqueItems.length >= 20) break; // 최대 20개\n  }\n}\n\nreturn uniqueItems;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3696,
+        560
+      ],
+      "id": "news-filter-processor",
+      "name": "뉴스 필터링 및 전처리"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -3400,
+        560
+      ],
+      "id": "batch-processor",
+      "name": "배치 처리"
+    },
+    {
+      "parameters": {
+        "tableId": "n8n - art news",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "title",
+              "fieldValue": "={{ $json.title }}"
+            },
+            {
+              "fieldId": "link",
+              "fieldValue": "={{ $json.link }}"
+            },
+            {
+              "fieldId": "pubDate",
+              "fieldValue": "={{ $json.pubDate }}"
+            },
+            {
+              "fieldId": "content",
+              "fieldValue": "={{ $json.content }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -3100,
+        560
+      ],
+      "id": "db-insert",
+      "name": "DB 저장",
+      "retryOnFail": false,
+      "credentials": {
+        "supabaseApi": {
+          "id": "DuAkunlGGkzyQL04",
+          "name": "Supabase account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData"
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        -2800,
+        560
+      ],
+      "id": "aggregate-for-ai",
+      "name": "AI 처리용 집계"
+    },
+    {
+      "parameters": {
+        "jsCode": "// AI Agent용 데이터 포맷팅\nconst input = $json.data;\nreturn [{\n  json: {\n    ai_input: JSON.stringify(input, null, 2)\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2600,
+        560
+      ],
+      "id": "format-for-ai",
+      "name": "AI 입력 포맷팅"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=아래 데이터에서 최고 품질의 문화예술 뉴스 5개를 선별해주세요:\n\n{{ $json.ai_input }}\n\n선별 기준:\n1. 중복 제거 (유사 주제는 최신/포괄적인 기사 선택)\n2. 다양성 확보 (음악, 미술, 연극, 영화 등 균형)\n3. 시의성 및 중요도 우선\n4. 대중적 관심도 고려\n\n다음 JSON 형식으로만 출력:\n[\n  {\n    \"title\": \"기사 제목\",\n    \"pubDate\": \"YYYY-MM-DD\",\n    \"link\": \"URL\"\n  }\n]"
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.1,
+      "position": [
+        -2400,
+        560
+      ],
+      "id": "ai-selector",
+      "name": "AI 뉴스 선별"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4.1-mini",
+          "mode": "list"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -2400,
+        784
+      ],
+      "id": "openai-model",
+      "name": "OpenAI 모델",
+      "credentials": {
+        "openAiApi": {
+          "id": "3FuIFmR3Yx4zuavb",
+          "name": "OpenAi-n8n-test"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "[\n  {\n    \"title\": \"국립아시아문화전당, 아시아 의식주 여행 개최\",\n    \"pubDate\": \"2025-08-05\",\n    \"link\": \"https://www.newsis.com/view/?id=NISI20250805_0001911380\"\n  }\n]"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        -2400,
+        900
+      ],
+      "id": "output-parser",
+      "name": "구조화된 출력 파서"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "output"
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        -2000,
+        560
+      ],
+      "id": "split-selected-news",
+      "name": "선별된 뉴스 분할"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 선별된 뉴스의 본문 요약 및 이미지 URL 추출을 병렬로 처리\nconst items = $input.all();\n\nreturn items.map(item => {\n  return {\n    json: {\n      title: item.json.title,\n      link: item.json.link,\n      pubDate: item.json.pubDate,\n      needsProcessing: true\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1800,
+        560
+      ],
+      "id": "prepare-content-extraction",
+      "name": "콘텐츠 추출 준비"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.link }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1600,
+        560
+      ],
+      "id": "fetch-article-content",
+      "name": "기사 본문 수집"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 본문 요약 및 이미지 URL 추출을 한 번에 처리\nconst html = $json.data;\n\n// 이미지 URL 추출\nconst imageMatch = html.match(/<meta property=\"og:image\" content=\"([^\"]+)\"\\s*\\/?>/i);\nconst imageUrl = imageMatch ? imageMatch[1] : null;\n\n// 본문 텍스트 추출 (간단한 HTML 태그 제거)\nconst textContent = html\n  .replace(/<script[^>]*>.*?<\\/script>/gi, '')\n  .replace(/<style[^>]*>.*?<\\/style>/gi, '')\n  .replace(/<[^>]+>/g, ' ')\n  .replace(/\\s+/g, ' ')\n  .trim()\n  .substring(0, 500); // 첫 500자만\n\nreturn [{\n  json: {\n    title: $('prepare-content-extraction').item.json.title,\n    link: $('prepare-content-extraction').item.json.link,\n    pubDate: $('prepare-content-extraction').item.json.pubDate,\n    content: textContent,\n    imageUrl: imageUrl\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1400,
+        560
+      ],
+      "id": "extract-content-and-image",
+      "name": "콘텐츠 및 이미지 추출"
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData"
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        -1200,
+        560
+      ],
+      "id": "aggregate-processed-news",
+      "name": "처리된 뉴스 집계"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-2.0-flash",
+          "mode": "list"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=다음 뉴스들을 30-70자 내로 요약하고, 디스코드 메시지를 생성해주세요:\n\n{{ JSON.stringify($json.data, null, 2) }}\n\n요구사항:\n1. 각 뉴스별 핵심 요약 (30-70자)\n2. 디스코드 메시지 형식으로 포맷팅\n3. 마크다운 및 이모지 활용\n4. 썸네일 미리보기를 위한 URL 처리\n\n다음 JSON 형식으로 응답:\n{\n  \"summaries\": [\n    {\"link\": \"URL\", \"summary\": \"요약문\"}\n  ],\n  \"discordMessage\": \"마크다운 형식의 완성된 메시지\"\n}"
+            }
+          ]
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1,
+      "position": [
+        -1000,
+        560
+      ],
+      "id": "generate-summaries-and-message",
+      "name": "요약 및 메시지 생성",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "VkwMNsi2swBIrPyt",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Gemini 응답 파싱\nconst rawResponse = $json.content?.parts?.[0]?.text || '';\nlet parsed;\n\ntry {\n  parsed = JSON.parse(rawResponse.replace(/```json|```/g, '').trim());\n} catch (err) {\n  throw new Error('AI 응답 파싱 실패: ' + err.message);\n}\n\n// 요약 업데이트를 위한 개별 아이템과 디스코드 메시지 반환\nconst results = [];\n\n// 각 요약에 대한 업데이트 아이템\nif (parsed.summaries) {\n  parsed.summaries.forEach(summary => {\n    results.push({\n      json: {\n        type: 'summary_update',\n        link: summary.link,\n        summary: summary.summary\n      }\n    });\n  });\n}\n\n// 디스코드 메시지 아이템\nif (parsed.discordMessage) {\n  results.push({\n    json: {\n      type: 'discord_message',\n      message: parsed.discordMessage\n    }\n  });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -800,
+        560
+      ],
+      "id": "parse-ai-response",
+      "name": "AI 응답 파싱"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.type }}",
+              "rightValue": "summary_update",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -600,
+        560
+      ],
+      "id": "route-by-type",
+      "name": "타입별 분기"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "n8n - art news",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "link",
+              "condition": "eq",
+              "keyValue": "={{ $json.link }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "summary",
+              "fieldValue": "={{ $json.summary }}"
+            },
+            {
+              "fieldId": "sent",
+              "fieldValue": "True"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -400,
+        460
+      ],
+      "id": "update-summary-in-db",
+      "name": "DB 요약 업데이트",
+      "credentials": {
+        "supabaseApi": {
+          "id": "DuAkunlGGkzyQL04",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "guildId": {
+          "__rl": true,
+          "value": "1402880734540206130",
+          "mode": "list",
+          "cachedResultName": "문화·예술 뉴스봇"
+        },
+        "channelId": {
+          "__rl": true,
+          "value": "1402904321737228378",
+          "mode": "list",
+          "cachedResultName": "n8n-newsbot"
+        },
+        "content": "={{ $json.message }}"
+      },
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        660
+      ],
+      "id": "send-discord-message",
+      "name": "디스코드 메시지 발송",
+      "credentials": {
+        "discordBotApi": {
+          "id": "cT0wsMuv3u93zVYF",
+          "name": "Discord Bot account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "threads token"
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -4512,
+        1200
+      ],
+      "id": "get-threads-token",
+      "name": "스레드 토큰 조회",
+      "credentials": {
+        "supabaseApi": {
+          "id": "DuAkunlGGkzyQL04",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "n8n - art news",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "sent",
+              "condition": "eq",
+              "keyValue": "true"
+            },
+            {
+              "keyName": "threads_sent",
+              "condition": "eq",
+              "keyValue": "false"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -4200,
+        1200
+      ],
+      "id": "get-news-for-threads",
+      "name": "스레드용 뉴스 조회",
+      "credentials": {
+        "supabaseApi": {
+          "id": "DuAkunlGGkzyQL04",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 스레드 설정 및 뉴스 데이터 통합\nconst tokenData = $('get-threads-token').all()[0]?.json;\nconst newsData = $('get-news-for-threads').all();\n\nif (!tokenData || newsData.length === 0) {\n  return [];\n}\n\nreturn [{\n  json: {\n    access_token: tokenData.Token,\n    thread_id: \"24197616939918667\",\n    newsData: newsData.slice(0, 5).map(item => item.json) // 최대 5개\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3900,
+        1200
+      ],
+      "id": "prepare-threads-data",
+      "name": "스레드 데이터 준비"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4.1-mini",
+          "mode": "list"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=다음 뉴스 데이터로 Threads용 포스트를 생성해주세요:\n{{ JSON.stringify($json.newsData, null, 2) }}\n\n요구사항:\n- 캐주얼한 반말톤\n- 뉴스 3개 선별하여 본문에 포함\n- 해시태그 2개 (문화예술 관련)\n- 댓글용 추가 설명\n- 출처 링크 포함\n\n다음 JSON 형식으로 응답:\n{\n  \"topic_tag\": \"#해시태그1\",\n  \"body\": \"메인 포스트 내용\",\n  \"reply\": \"첫 번째 댓글\",\n  \"reply2\": \"두 번째 댓글 (출처 포함)\"\n}"
+            }
+          ]
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        -3600,
+        1200
+      ],
+      "id": "generate-threads-content",
+      "name": "스레드 콘텐츠 생성",
+      "credentials": {
+        "openAiApi": {
+          "id": "3FuIFmR3Yx4zuavb",
+          "name": "OpenAi-n8n-test"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Threads 콘텐츠 파싱\nconst raw = $json.message.content;\nconst parsed = JSON.parse(raw);\n\nreturn [{\n  json: {\n    access_token: $('prepare-threads-data').item.json.access_token,\n    thread_id: $('prepare-threads-data').item.json.thread_id,\n    ...parsed\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3300,
+        1200
+      ],
+      "id": "parse-threads-content",
+      "name": "스레드 콘텐츠 파싱"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.threads.net/v1.0/{{ $json.thread_id }}/threads",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "media_type",
+              "value": "TEXT"
+            },
+            {
+              "name": "text",
+              "value": "={{ $json.body }}"
+            },
+            {
+              "name": "access_token",
+              "value": "={{ $json.access_token }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -3000,
+        1200
+      ],
+      "id": "create-main-thread",
+      "name": "메인 스레드 생성"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.threads.net/v1.0/{{ $('parse-threads-content').item.json.thread_id }}/threads_publish?creation_id={{ $json.id }}&access_token={{ $('parse-threads-content').item.json.access_token }}"
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2700,
+        1200
+      ],
+      "id": "publish-main-thread",
+      "name": "메인 스레드 게시"
+    },
+    {
+      "parameters": {
+        "amount": 30
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -2400,
+        1200
+      ],
+      "id": "wait-before-reply1",
+      "name": "댓글 전 대기"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.threads.net/v1.0/{{ $('parse-threads-content').item.json.thread_id }}/threads",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "media_type",
+              "value": "TEXT"
+            },
+            {
+              "name": "text",
+              "value": "={{ $('parse-threads-content').item.json.reply }}"
+            },
+            {
+              "name": "reply_to_id",
+              "value": "={{ $('publish-main-thread').item.json.id }}"
+            },
+            {
+              "name": "access_token",
+              "value": "={{ $('parse-threads-content').item.json.access_token }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1200,
+        1200
+      ],
+      "id": "create-reply2",
+      "name": "두번째 댓글 생성"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.threads.net/v1.0/{{ $('parse-threads-content').item.json.thread_id }}/threads_publish?creation_id={{ $json.id }}&access_token={{ $('parse-threads-content').item.json.access_token }}"
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -900,
+        1200
+      ],
+      "id": "publish-reply2",
+      "name": "두번째 댓글 게시"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "n8n - art news",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "sent",
+              "condition": "eq",
+              "keyValue": "true"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "threads_sent",
+              "fieldValue": "true"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -600,
+        1200
+      ],
+      "id": "mark-threads-sent",
+      "name": "스레드 발송 완료 표시",
+      "credentials": {
+        "supabaseApi": {
+          "id": "DuAkunlGGkzyQL04",
+          "name": "Supabase account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "매일 오전 RSS 수집": {
+      "main": [
+        [
+          {
+            "node": "RSS 피드 설정",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "수동 실행 트리거": {
+      "main": [
+        [
+          {
+            "node": "스레드 토큰 조회",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS 피드 설정": {
+      "main": [
+        [
+          {
+            "node": "피드 분할",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "피드 분할": {
+      "main": [
+        [
+          {
+            "node": "RSS 읽기",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS 읽기": {
+      "main": [
+        [
+          {
+            "node": "뉴스 필터링 및 전처리",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "뉴스 필터링 및 전처리": {
+      "main": [
+        [
+          {
+            "node": "배치 처리",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "배치 처리": {
+      "main": [
+        [],
+        [
+          {
+            "node": "DB 저장",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB 저장": {
+      "main": [
+        [
+          {
+            "node": "AI 처리용 집계",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI 처리용 집계": {
+      "main": [
+        [
+          {
+            "node": "AI 입력 포맷팅",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI 입력 포맷팅": {
+      "main": [
+        [
+          {
+            "node": "AI 뉴스 선별",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI 뉴스 선별": {
+      "main": [
+        [
+          {
+            "node": "선별된 뉴스 분할",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI 모델": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI 뉴스 선별",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "구조화된 출력 파서": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI 뉴스 선별",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "선별된 뉴스 분할": {
+      "main": [
+        [
+          {
+            "node": "콘텐츠 추출 준비",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "콘텐츠 추출 준비": {
+      "main": [
+        [
+          {
+            "node": "기사 본문 수집",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "기사 본문 수집": {
+      "main": [
+        [
+          {
+            "node": "콘텐츠 및 이미지 추출",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "콘텐츠 및 이미지 추출": {
+      "main": [
+        [
+          {
+            "node": "처리된 뉴스 집계",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "처리된 뉴스 집계": {
+      "main": [
+        [
+          {
+            "node": "요약 및 메시지 생성",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "요약 및 메시지 생성": {
+      "main": [
+        [
+          {
+            "node": "AI 응답 파싱",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI 응답 파싱": {
+      "main": [
+        [
+          {
+            "node": "타입별 분기",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "타입별 분기": {
+      "main": [
+        [
+          {
+            "node": "DB 요약 업데이트",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "디스코드 메시지 발송",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "스레드 토큰 조회": {
+      "main": [
+        [
+          {
+            "node": "스레드용 뉴스 조회",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "스레드용 뉴스 조회": {
+      "main": [
+        [
+          {
+            "node": "스레드 데이터 준비",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "스레드 데이터 준비": {
+      "main": [
+        [
+          {
+            "node": "스레드 콘텐츠 생성",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "스레드 콘텐츠 생성": {
+      "main": [
+        [
+          {
+            "node": "스레드 콘텐츠 파싱",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "스레드 콘텐츠 파싱": {
+      "main": [
+        [
+          {
+            "node": "메인 스레드 생성",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "메인 스레드 생성": {
+      "main": [
+        [
+          {
+            "node": "메인 스레드 게시",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "메인 스레드 게시": {
+      "main": [
+        [
+          {
+            "node": "댓글 전 대기",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "댓글 전 대기": {
+      "main": [
+        [
+          {
+            "node": "첫 댓글 생성",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "첫 댓글 생성": {
+      "main": [
+        [
+          {
+            "node": "첫 댓글 게시",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "첫 댓글 게시": {
+      "main": [
+        [
+          {
+            "node": "두번째 댓글 전 대기",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "두번째 댓글 전 대기": {
+      "main": [
+        [
+          {
+            "node": "두번째 댓글 생성",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "두번째 댓글 생성": {
+      "main": [
+        [
+          {
+            "node": "두번째 댓글 게시",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "두번째 댓글 게시": {
+      "main": [
+        [
+          {
+            "node": "스레드 발송 완료 표시",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

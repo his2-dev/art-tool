@@ -1,0 +1,399 @@
+{
+  "name": "My workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyWeek",
+              "hour": 9
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "q": "xxx",
+          "sender": "looker-studio-noreply@google.com"
+        },
+        "options": {
+          "downloadAttachments": true
+        }
+      },
+      "id": "a12be3d0-6007-4e22-92dc-48dde2d4853b",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "awX7jUrXFkAZEs4u",
+          "name": "Testing Gmail Account The52Questions@gmail.com"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "binaryPropertyName": "attachment_0",
+        "options": {}
+      },
+      "id": "0de07367-08ad-4719-8140-95c02dd09c75",
+      "name": "Reading PDF File",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        240,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a5d82fb1-f54c-4957-a45f-ad460724b447",
+              "name": "=data",
+              "value": "={{ $('Reading PDF File').item.json.text }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "79f3c1cd-2223-443a-ae3d-b9b808815877",
+      "name": "Consolidating Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [
+        560,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c13d5e84-16c2-43b0-b939-bef956e827c0",
+              "name": "chatInput",
+              "value": "={{ $json.Rules }}\n\nHere is the data:\n{{ $('Reading PDF File').item.json.text }}\n\nHere is information about the company:\n{{ $json.Context }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ee287904-1896-4da6-a5d4-1618e36e208f",
+      "name": "Consolidating Prompt",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [
+        760,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.5-flash",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        1040,
+        240
+      ],
+      "id": "48e8571b-dd87-489b-8679-771ee92123cb",
+      "name": "Google Gemini Chat Model"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c13d5e84-16c2-43b0-b939-bef956e827c0",
+              "name": "chatInput",
+              "value": "=Take the input text provided and dynamically format it into a clean, readable HTML structure. Use the following rules for formatting:\n\nHeadings:\n\nUse <h1> for the main title.\nUse <h2> for main sections.\nUse <h3> for subsections.\nParagraphs:\n\nWrap body text in <p> tags.\nLists:\n\nUse <ul> for unordered lists and <li> for point-form content.\nEmphasis:\n\nUse <strong> for bold text.\nUse <em> for italicized text.\nStyling (Optional):\n\nInclude basic inline CSS for readability (e.g., font family, line spacing).\nOutput Requirements:\n\nFormat all content using point-form lists where applicable.\nProvide only the formatted HTML code—no additional text or comments.\n\nInput Text: {{ $json.text }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7c7fe97d-bf39-41a3-bb92-a633a377ae2c",
+      "name": "Consolidating Prompt1",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [
+        1440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.0-flash-exp",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        1740,
+        240
+      ],
+      "id": "d5e6f632-2ef1-4c09-8206-a08e069798c4",
+      "name": "Google Gemini Chat Model1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the raw input text dynamically from the previous node\nconst rawHTML = $json.text; // Adjust to match the actual field name in your input\n\n// Use regex to clean up the unwanted ```html prefix and trailing ``` if present\nconst cleanedHTML = rawHTML\n    .replace(/^```html\\s*/, \"\") // Removes the ```html prefix and any leading whitespace\n    .replace(/```$/, \"\") // Removes the trailing ```\n    .trim(); // Cleans up any remaining whitespace\n\n// Return the cleaned HTML for further processing\nreturn [\n  {\n    html: cleanedHTML, // Cleaned and formatted HTML\n  },\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2040,
+        20
+      ],
+      "id": "7175046e-3334-438a-aae4-5dd34febc012",
+      "name": "Code"
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [
+        1020,
+        0
+      ],
+      "id": "bb672d8e-2279-4ee0-9ced-8ee802706020",
+      "name": "Week-on-Week Analyzer"
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [
+        1660,
+        0
+      ],
+      "id": "a48a2f4e-1446-4ef9-8d72-39ff6b632ab2",
+      "name": "Formatting"
+    },
+    {
+      "parameters": {
+        "sendTo": "xxxx",
+        "subject": "Week-on-Week Analyzer",
+        "message": "={{ $json.html }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2260,
+        20
+      ],
+      "id": "adaa59fd-7573-4fb4-a553-51ddde142ec9",
+      "name": "Send a message",
+      "webhookId": "68cb4c51-a405-4855-be34-edb87f654f2d",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "awX7jUrXFkAZEs4u",
+          "name": "Testing Gmail Account The52Questions@gmail.com"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "0badea6b-8e15-4f70-b87d-bb8e808f113e",
+              "name": "Context",
+              "value": "=UrbanNest Realty is a forward-thinking real estate company dedicated to transforming the urban living experience by offering seamless, affordable, and innovative solutions for renters and homebuyers. With a focus on modern lifestyles, UrbanNest specializes in connecting clients with stylish, secure, and budget-friendly homes through cutting-edge technology and personalized services. Their creative approach emphasizes hassle-free processes, smart financial options, and community-driven living, making them a trusted partner for navigating the complexities of city real estate. Committed to accessibility and customer satisfaction, UrbanNest Realty empowers individuals to find their dream homes with ease and confidence.",
+              "type": "string"
+            },
+            {
+              "id": "b6d695d3-d486-43d2-801d-9114c4ff3548",
+              "name": "Rules",
+              "value": "Analyze week-on-week ad performance and classify it into one of the defined scenarios based on volume of leads and Cost Per Lead (CPL) changes. Follow the structured format provided below.\n\nPerformance Scenario\nStart with a clear scenario statement based on the performance. Choose from the following:\n\nTotal Volume of leads increasing with decreasing CPL (BEST)\nTotal Volume of leads increasing with stable CPL (BEST)\nTotal Volume of leads increasing with slightly increasing CPL (+5-10%) (ACCEPTABLE)\nTotal Volume of leads stable with decreasing CPL (STILL OKAY)\nTotal Volume of leads stable with stable CPL (STILL OKAY)\nTotal Volume of leads stable with increasing CPL (CAUTIOUS BUT OKAY)\nTotal Volume of leads decreasing with decreasing CPL (STILL OKAY, LIKELY DUE TO SPEND)\nTotal Volume of leads decreasing with stable CPL (SORT OF OKAY)\nTotal Volume of leads decreasing with increasing CPL (NOT OKAY, OPTIMIZATION NEEDED)\nTotal Volume of leads increasing significantly with sharply increasing CPL (+10% or more) (CAUTION)\nTotal Volume of leads stable with significantly decreasing CPL (GOOD, OPPORTUNITY TO SCALE)\nTotal Volume of leads increasing with erratic CPL changes (NEEDS REVIEW)\nTotal Volume of leads decreasing with erratic CPL changes (POOR)\nTotal Volume of leads stable with significantly increasing CPL (+15% or more) (ALERT)\n\nExample:\nScenario: Volume of leads decreasing with increasing CPL (NOT OKAY, OPTIMIZATION NEEDED). Leads decreased by -10%, CPL increased by +15%. Total Amount Spent Increased/decreased by X%\n\nAbove $12 CPL Creatives (Non-Performing)\nList all creatives with CPL above $12.\nFor each creative:\n\nCreative Name: [Creative Name]\nAmount Spent: \nCPL: $X (above $12).\nLeads: X.\nAction: Recommend pausing or optimizing.\n(Repeat for all creatives with CPL above $12.)\n\nBelow $12 CPL Creatives (Performing)\nSelect the top 3 performing creatives (based on CPL and leads).\nFor each creative:\n\nCreative Name: [Creative Name]\nAmount Spent: \nCPL: $X (below $12).\nLeads: X.\n\nAction: Recommend continuing or scaling.\n(List the top 3 performing creatives based on CPL and leads.)\n\nCreatives with Insufficient Data\nSelect the top 2 creatives with the highest ad spend but insufficient data.\nFor each creative:\n\nCreative Name: [Creative Name]\nAmount Spent: $X.\nCPL: Not available or unreliable.\nLeads: Less than X.\n\nAction: Gather more data.\n(List the top 2 creatives with the highest ad spend and insufficient data.)\n\nOutput Format:\nThe response should be structured as follows:\n\nPerformance Scenario\n[Scenario Statement].\nExample:\n\"Scenario: Volume of leads decreasing with increasing CPL (NOT OKAY, OPTIMIZATION NEEDED). Leads decreased by -10%, CPL increased by +15%.\"\nAbove $12 CPL Creatives (Non-Performing)\n[Creative Name]\nAmount Spent: $X\nCPL: $X (above $12).\nLeads: X.\nAction: Recommend pausing or optimizing.\n(Repeat for all creatives with CPL above $12.)\nBelow $12 CPL Creatives (Performing)\n[Top 3 Creative Names]\nAmount Spent: $X\nCPL: $X (below $12).\nLeads: X.\n\nAction: Recommend continuing or scaling.\n(List the top 3 performing creatives based on CPL and leads.)\nCreatives with Insufficient Data\n\n[Top 2 Creative Names by Ad Spend]\nAmount Spent:: $X.\nCPL: Not available or unreliable.\nLeads: Less than X.\n\nAction: Gather more data.\n(List the top 2 creatives with the highest ad spend and insufficient data.)\nInstructions for the LLM:\nBe concise and actionable.\nAdhere strictly to the structure provided.\nDo not include any unnecessary text outside the specified format.\n\nYou will also be provided the descriptin of the creative - for both the best-performing and worst-performing creatives, hypothesize why the creative works and doesn't work - provide creative insights and recommendations on what to potentially try as ideas for new ads\n",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        440,
+        0
+      ],
+      "id": "1f4903f2-855a-4b62-a7cc-b1af196ee65e",
+      "name": "Company Context + Rules"
+    },
+    {
+      "parameters": {
+        "select": "user",
+        "user": {
+          "__rl": true,
+          "value": "=xxx",
+          "mode": "id"
+        },
+        "text": "={{ $json.text }}",
+        "otherOptions": {}
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        1340,
+        300
+      ],
+      "id": "d9077645-4844-405f-bac8-197da0cbea3d",
+      "name": "Send a message1",
+      "webhookId": "c499c717-a08d-4754-ad4e-7d3a1c3b2bf4"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Reading PDF File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reading PDF File": {
+      "main": [
+        [
+          {
+            "node": "Company Context + Rules",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consolidating Data": {
+      "main": [
+        [
+          {
+            "node": "Consolidating Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consolidating Prompt": {
+      "main": [
+        [
+          {
+            "node": "Week-on-Week Analyzer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Week-on-Week Analyzer",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consolidating Prompt1": {
+      "main": [
+        [
+          {
+            "node": "Formatting",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Formatting",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Week-on-Week Analyzer": {
+      "main": [
+        [
+          {
+            "node": "Consolidating Prompt1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send a message1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatting": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Company Context + Rules": {
+      "main": [
+        [
+          {
+            "node": "Consolidating Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "71f6ac4b-6c7f-4330-8d17-e0d02b642db2",
+  "meta": {
+    "instanceId": "0e7581495d237b92e8867c3982482dfb4b58c5ac0706f26b606e9e9ffb09dffd"
+  },
+  "id": "BsUHugDF8xewfCOI",
+  "tags": []
+}

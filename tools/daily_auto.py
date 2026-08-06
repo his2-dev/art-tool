@@ -24,6 +24,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from tools.article_parser import find_best_image, http_get, split_headline  # noqa: E402
+from tools.textkit import topic_key  # noqa: E402
 
 # ── 설정 ────────────────────────────────────────────────────────────────────
 
@@ -75,9 +76,19 @@ NONCULTURE_ARCH_RE = re.compile(r"도로|고속도로|교량|터널|철도|공�
 # 부동산·시공성 소식은 건축 트리거가 있어도 배제.
 REALESTATE_RE = re.compile(r"아파트|분양|청약|오피스텔|재건축|재개발|입주|시공사|매매|부동산|단지|상가")
 
-# 별세·부고 맥락 판별 — 미술계 인물 별세는 최상위 화제, 일반 부고는 배제.
-DEATH_RE = re.compile(r"별세|타계|영면|선종|숙환|작고|타계")
-FIGURE_RE = re.compile(r"작가|화가|화백|거장|건축가|조각가|사진작가|예술가|디자이너|마에스트로|아티스트")
+# 별세·부고 맥락 판별 — '거장'만 통과시킨다.
+# 예술계 협회장·이사장 부고가 워낙 많아 예전엔 부고를 통째로 막았는데,
+# 그 탓에 히가시노 게이고 같은 진짜 거장까지 놓쳤다. 그래서 2단으로 나눈다:
+#   1단 FIGURE_RE  — '창작자인가' (미술 외 문학·영화·음악 직군까지)
+#   2단 fame_tier() — '거장인가'  (위키백과 문서 규모, LLM 호출 없음)
+DEATH_RE = re.compile(r"별세|타계|영면|선종|숙환|작고")
+FIGURE_RE = re.compile(
+    r"작가|화가|화백|거장|건축가|조각가|사진작가|예술가|디자이너|마에스트로|아티스트"
+    r"|소설가|시인|극작가|만화가|삽화가"
+    r"|감독|배우|작곡가|지휘자|피아니스트|무용가|안무가|성악가|명창")
+# 조직 직함이 붙으면 인물이 아니라 '자리'가 주인공 → 위키 조회 없이 즉시 탈락.
+OFFICE_RE = re.compile(
+    r"협회장|이사장|관장|위원장|조합장|회장|총장|청장|국장|과장|교수|원장|대표이사|의원|시장|장관")
 
 # 뉴스성 가점 키워드 (점수)
 # 레퍼런스 채널(artart.today, b.framemag 등)이 다루는 콘텐츠 유형 반영:
@@ -294,6 +305,187 @@ def is_art_related(title: str) -> bool:
     return False
 
 
+# ── L1 시그널 가점 ──────────────────────────────────────────────────────────
+# signal_scan.py가 레퍼런스 채널에서 잡아둔 '지금 반응 있는 소재'와 겹치는 기사에 가점.
+#
+# 단 레퍼런스 채널을 그대로 따라가면 안 된다 — 그쪽은 최신 소식 말고도 역사·상식·명작
+# 해설 같은 에버그린을 자체 발굴해 올린다. 우리는 실시간 뉴스라 그건 겹치면 안 됨.
+# 그래서 두 겹으로 막는다:
+#   ① signal_scan이 에버그린으로 분류한 신호는 여기서 제외
+#   ② 가점은 '오늘 수집된 기사'와 토큰이 겹칠 때만 → 기사가 없는 소재는 애초에 못 받음
+SIGNAL_BONUS_MAX = 10.0
+KST = timezone(timedelta(hours=9))
+_signals_cache = None
+
+
+def load_signals():
+    """오늘(없으면 어제) 시그널을 읽어 시의성 있는 것만 토픽 집합으로 반환."""
+    global _signals_cache
+    if _signals_cache is not None:
+        return _signals_cache
+
+    _signals_cache = []
+    # signals_latest.json(커밋됨)이 우선 — 클라우드 스케줄은 이것만 볼 수 있다.
+    # 로컬 전체 스냅샷(output/signals/*.json)은 gitignore 대상이라 로컬에서만 존재한다.
+    sig_dir = os.path.join(ROOT, "output", "signals")
+    paths = [os.path.join(ROOT, "output", "signals_latest.json")]
+    paths += [os.path.join(sig_dir, f"{(datetime.now(KST) - timedelta(days=d)):%Y-%m-%d}.json")
+              for d in (0, 1)]
+
+    for path in paths:
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            continue
+        # 너무 오래된 시그널은 시의성이 없다 (실시간 뉴스 매거진이므로)
+        scanned = str(data.get("scanned_at", ""))[:10]
+        if scanned:
+            try:
+                age = (datetime.now(KST).date()
+                       - datetime.strptime(scanned, "%Y-%m-%d").date()).days
+                if age > 2:
+                    continue
+            except ValueError:
+                pass
+        for s in data.get("signals", []):
+            if s.get("evergreen"):
+                continue                       # ① 에버그린 제외
+            topic = set(s.get("topic") or [])
+            if len(topic) >= 2:
+                _signals_cache.append((topic, float(s.get("score", 0)), s.get("caption", "")))
+        if _signals_cache:
+            break
+    return _signals_cache
+
+
+def signal_bonus(title: str) -> float:
+    """기사 제목이 시그널 토픽과 겹치면 가점. 겹치는 신호가 없으면 0.
+
+    토크나이저는 signal_scan과 반드시 같은 것을 써야 한다 — 다르면 토큰이 어긋나
+    가점이 조용히 0으로 수렴한다.
+    """
+    signals = load_signals()
+    if not signals:
+        return 0.0
+    tokens = topic_key(title)
+    if not tokens:
+        return 0.0
+
+    best = 0.0
+    for topic, score, _cap in signals:
+        overlap = len(tokens & topic)
+        if overlap >= 2:                       # ② 실제 기사와 겹칠 때만
+            best = max(best, min(SIGNAL_BONUS_MAX, 4 + overlap + score / 5))
+    return best
+
+
+# ── 부고 명성 판정 ──────────────────────────────────────────────────────────
+# 한국어 위키백과 공개 API만 사용한다 (인증·요금 없음, LLM 호출 0).
+# 부고 제목일 때만 호출되므로 하루 1~4회 수준.
+WIKI_API = "https://ko.wikipedia.org/w/api.php"
+FAME_LANG_MIN, FAME_BYTES_MIN = 15, 25000     # 거장
+FAME_LANG_EDGE, FAME_BYTES_EDGE = 8, 15000    # 경계
+_PERSON_HINT = ("소설가", "미술가", "화가", "작가", "감독", "배우", "시인", "조각가",
+                "사진작가", "건축가", "디자이너", "작곡가", "지휘자", "무용가", "만화가",
+                "음악가", "예술가", "가수", "연출가", "설치미술", "피아니스트", "성악가")
+_wiki_cache: dict = {}
+
+
+def _wiki_page(name: str):
+    """위키 문서 요약. 실패하면 None (네트워크 문제로 파이프라인이 죽지 않게)."""
+    if name in _wiki_cache:
+        return _wiki_cache[name]
+    out = None
+    try:
+        r = http_get(
+            f"{WIKI_API}?action=query&titles={quote(name)}"
+            "&prop=langlinks|description|info&lllimit=500&format=json&redirects=1",
+            timeout=10)
+        for pid, p in r.json().get("query", {}).get("pages", {}).items():
+            if pid == "-1":
+                break
+            desc = p.get("description", "") or ""
+            out = {"title": p.get("title", ""), "langs": len(p.get("langlinks", [])),
+                   "bytes": p.get("length", 0),
+                   "person": any(h in desc for h in _PERSON_HINT)}
+    except Exception:
+        out = None
+    _wiki_cache[name] = out
+    return out
+
+
+def _wiki_search(name: str, hint: str):
+    """동음이의 대응 — '김창열'은 가수 문서로 가버려서 '김창열 (화가)'를 못 찾는다."""
+    key = f"s:{name}:{hint}"
+    if key in _wiki_cache:
+        return _wiki_cache[key]
+    out = None
+    try:
+        r = http_get(f"{WIKI_API}?action=query&list=search"
+                     f"&srsearch={quote(name + ' ' + hint)}&srlimit=3&format=json",
+                     timeout=10)
+        for hit in r.json().get("query", {}).get("search", []):
+            info = _wiki_page(hit["title"])
+            if info and info["person"] and \
+                    name.replace(" ", "") in info["title"].replace(" ", ""):
+                out = info
+                break
+    except Exception:
+        out = None
+    _wiki_cache[key] = out
+    return out
+
+
+def _name_candidates(title: str):
+    """부고 제목에서 인물명 후보 추출.
+    한국어 부고는 대개 '<수식어> <직군> <이름> 별세' 꼴."""
+    t = re.sub(r"[\[\]<>《》「」'\"…·]", " ", title)
+    toks = re.sub(r"\s+", " ", DEATH_RE.split(t)[0]).strip().split()
+    for i, w in enumerate(toks):
+        if FIGURE_RE.search(w):
+            if i + 1 < len(toks):
+                yield re.sub(r"(씨|님|옹|여사|선생)$", "",
+                             " ".join(toks[i + 1:i + 3])).strip()  # 외국인 2어절
+                yield toks[i + 1]
+            if i > 0:
+                yield toks[i - 1]
+    for w in sorted((w for w in toks if re.fullmatch(r"[가-힣]{2,6}", w)
+                     and not FIGURE_RE.search(w) and not OFFICE_RE.search(w)),
+                    key=len, reverse=True)[:1]:
+        yield w
+
+
+def obit_score(title: str) -> float:
+    """부고 제목 → 큐레이션 가감점. 거장 +7 / 경계 +2 / 그 외 -8."""
+    if OFFICE_RE.search(title):
+        return -8.0
+    m = FIGURE_RE.search(title)
+    if not m:
+        return -8.0
+
+    cands = [c for c in _name_candidates(title) if c and len(c) >= 2]
+    best = None
+    for c in cands:
+        info = _wiki_page(c)
+        if info and info["person"] and (best is None or info["langs"] > best["langs"]):
+            best = info
+    if best is None:
+        for c in cands[:2]:
+            best = _wiki_search(c, m.group(0))
+            if best:
+                break
+    if best is None:
+        return -8.0
+    if best["langs"] >= FAME_LANG_MIN or best["bytes"] >= FAME_BYTES_MIN:
+        return 7.0
+    if best["langs"] >= FAME_LANG_EDGE or best["bytes"] >= FAME_BYTES_EDGE:
+        return 2.0
+    return -8.0
+
+
 def curation_score(title: str, age_hours: float) -> float:
     """뉴스성·시의성 기반 큐레이션 점수. 높을수록 좋음. 음수면 부적합."""
     if HARD_EXCLUDE_RE.search(title):
@@ -305,9 +497,11 @@ def curation_score(title: str, age_hours: float) -> float:
     for kw, pts in PENALTY_KEYWORDS.items():
         if kw in title:
             score += pts
-    # 별세·부고 맥락: 미술계 인물이면 최상위 화제(가점), 일반 부고면 강한 감점.
+    # 별세·부고 맥락: 거장이면 최상위 화제(가점), 협회장·무명이면 강한 감점.
     if DEATH_RE.search(title):
-        score += 7 if FIGURE_RE.search(title) else -8
+        score += obit_score(title)
+    # L1 시그널 — 레퍼런스 채널에서 지금 반응 있는 소재와 겹치면 최우선 가점.
+    score += signal_bonus(title)
     # 시의성: 24시간 이내 +3 → 72시간에서 0으로 선형 감소
     score += max(0.0, (72 - min(age_hours, 72)) / 72 * 3)
     return score

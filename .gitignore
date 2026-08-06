@@ -10,6 +10,11 @@ output/pending/*
 !output/pending/*.png
 !output/pending/*.json
 
+# L1 시그널 — 슬림본만 추적한다. 스케줄 태스크가 클라우드에서 레포를 클론해 돌기 때문에
+# 이 파일이 커밋돼야 프라이머리 발행 경로에서도 시그널 가점이 작동한다.
+# 전체 스냅샷(output/signals/*.json)과 이력 DB는 용량이 커서 로컬 전용.
+!output/signals_latest.json
+
 # Python 캐시
 __pycache__/
 *.py[cod]
