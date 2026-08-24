@@ -95,8 +95,9 @@ python3 -c "from datetime import date; d=date.today(); print(d.isoformat(), f'{d
 
 ## STEP 2 — 후보 수집·선별 → `curation.md` 읽고 진행
 
-6건 이상 수집 → 점수 평가 → 서로 다른 카테고리 2건 확정.
-**그중 1건은 반드시 '트렌드 슬롯'** (이번 주 화제·이슈, b.framemag·artart.today 감성 — curation.md 참고).
+8건 이상 수집 → 하드 게이트 → 점수 평가 → 2건 확정.
+**선별 기준은 '사건성 + 인지도'** — 오늘 문화예술계에 실제로 벌어진 일인가,
+그 고유명사를 대중이 아는가. 카테고리 다양성은 강제하지 않는다 (curation.md 참고).
 
 ## STEP 3 — image_url 확정 → `image-rules.md` 읽고 진행
 
