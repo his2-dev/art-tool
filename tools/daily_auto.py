@@ -874,7 +874,12 @@ def main() -> int:
         print("[오류] 후보 없음 — Discord 전송 생략", file=sys.stderr)
         return 3
 
-    today = date.today().isoformat()
+    # date.today()는 GH Actions 러너 기본 타임존(UTC)을 쓴다. 워크플로우의 bash
+    # 가드는 TZ=Asia/Seoul 기준으로 "오늘"을 판정하는데, 실행이 예정보다 크게
+    # 지연돼 KST 자정을 넘기면 두 "오늘"이 어긋나 가드가 무력화되고 이미 발행된
+    # 날짜를 중복 발행하는 사고가 났다(2026-08-27→28 새벽, 10.5시간 지연 사례).
+    # 두 쪽 다 KST 기준으로 통일한다.
+    today = datetime.now(KST).date().isoformat()
     os.makedirs("output/news", exist_ok=True)
 
     all_titles = [{"title": c["title"], "url": c["url"]} for c in candidates]
