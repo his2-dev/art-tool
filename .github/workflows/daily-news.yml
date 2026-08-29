@@ -47,6 +47,18 @@ jobs:
               exit 0
             fi
           done
+          # 3) 폴백 자신이 오늘자를 이미 발행했으면 스킵.
+          #    GitHub Actions 스케줄 지연이 몇 시간~10시간대로 커지면서, 어제 몫 폴백이
+          #    늦게 실행돼 오늘 날짜(KST)로 발행한 뒤 오늘 몫 폴백이 또 실행되며 같은
+          #    _auto_*.json을 새 내용으로 덮어써 하루 두 번 Discord 알림이 나가는 사고가
+          #    있었다(2026-08-29: 05:58 KST 1차 + 23:40 KST 2차 중복 발행).
+          #    위 1)·2)는 "정규가 발행했는가"만 보고 "폴백 자신이 이미 발행했는가"는
+          #    안 봤으므로 별도로 확인한다.
+          if ls output/news/${TODAY}_auto_*.json 2>/dev/null > /dev/null; then
+            echo "오늘자(${TODAY}) 폴백 발행물이 main에 이미 존재 — 재발행 생략"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           echo "오늘자 발행물 없음 — 폴백 진행"
           echo "skip=false" >> "$GITHUB_OUTPUT"
 
@@ -83,7 +95,9 @@ jobs:
             echo "커밋할 변경 없음"
           else
             # commit을 먼저 해야 pull --rebase가 동작 (staged 상태에서 rebase 불가)
-            git commit -m "auto: $(date +%Y-%m-%d\ %H:%M) KST 뉴스 자동 발행 기록"
+            # 러너 기본 타임존은 UTC라 date 명령 결과를 그대로 "KST"라 찍으면 실제
+            # 시각과 어긋난다(디버깅 시 혼란의 원인이었음) — TZ 지정으로 실제 KST를 찍는다.
+            git commit -m "auto: $(TZ=Asia/Seoul date +%Y-%m-%d\ %H:%M) KST 뉴스 자동 발행 기록"
             git pull --rebase origin main
             git push origin main || (sleep 5 && git pull --rebase origin main && git push origin main)
           fi
