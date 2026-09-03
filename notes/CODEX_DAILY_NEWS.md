@@ -261,6 +261,10 @@ git push -u origin HEAD
 | 새벽에 알림이 옴 | GitHub Actions 폴백 지연. `daily-news.yml`의 KST 16:50~19:30 컷오프 확인 |
 | Codex가 그냥 종료 | `output/codex_last_run.txt` 확인 — STEP 0 스킵인지 진짜 실패인지 구분 |
 | 푸시 거절 | `git fetch origin && git rebase origin/main` 후 재푸시 |
+| 작업이 `Queued`에서 안 움직임 | 배터리 구동 중 + `DisallowStartIfOnBatteries` (6절 참고) |
+| 러너 수정이 자꾸 사라짐 | 러너의 `git reset --hard origin/main`이 자기 자신을 되돌림 → 커밋·푸시할 것 |
+| `codex exec` 0인데 스크립트가 실패 처리 | PS 5.1 `2>&1` + `ErrorActionPreference=Stop` 함정 (러너 주석 참고) |
+| `failed to load models cache: missing field base_instructions` | `~/.codex/models_cache.json` 삭제 후 재실행 |
 
 ---
 
@@ -279,6 +283,9 @@ Register-ScheduledTask -TaskName "피아트_일일뉴스_Codex" `
   -Description "p.art_mag 일일 뉴스 2건 자동 발행 (Codex)"
 ```
 
+- `-AllowStartIfOnBatteries -DontStopIfGoingOnBatteries` — **없으면 노트북이 배터리 구동 중일 때
+  작업이 `Queued`에 멈춘 채 영영 실행되지 않는다** (`New-ScheduledTaskSettingsSet` 기본값이
+  `DisallowStartIfOnBatteries = True`). 2026-09-03 실사고.
 - `-StartWhenAvailable` — PC가 꺼져 있어 놓친 실행을 다음 로그온 때 보충한다.
 - 테스트: `Start-ScheduledTask -TaskName "피아트_일일뉴스_Codex"` → 몇 분 뒤 `output\codex_last_run.txt` 확인.
 - 끄기: `Disable-ScheduledTask -TaskName "피아트_일일뉴스_Codex"`
