@@ -218,9 +218,11 @@ python tools/news_poster.py \
 
 | 항목 | 내용 |
 |------|------|
-| 태스크 ID | `daily-news-thumbnail` |
+| 주 실행 | ChatGPT Work 웹 클라우드 예약 `피아트 일일 뉴스` |
+| 대상 | GitHub `his2-dev/art-tool`의 `main` → `claude/news-YYYYMMDD` |
 | 실행 시간 | 매일 16:07 KST (17:07은 5시간 세션 한도에 매번 걸려 실패했다 — 한 시간 앞당겨 회피) |
 | 동작 | 뉴스 2건 선별 → 이미지 생성 → 커밋·푸시 → Discord 전송 |
 | 파이프라인 | `.claude/skills/daily-news/` (daily-news 스킬) |
 | 폴백 | GitHub Actions `daily-news.yml` 17:11/17:51/18:31 KST 시도 (당일 발행물이 main 또는 `claude/*`에 있으면 스킵, KST 16:50~19:30 밖 실행이면 그날 거름) |
-| 관리 | Claude Code 사이드바 → Scheduled |
+| 로컬 복구용 | Windows 작업 `피아트_일일뉴스_Codex` — 현재 비활성(웹 예약과 동시 활성화 금지) |
+| 관리 | ChatGPT 웹/데스크톱 → Scheduled |
