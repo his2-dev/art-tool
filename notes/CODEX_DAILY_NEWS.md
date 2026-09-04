@@ -190,6 +190,10 @@ python tools/news_poster.py --headline1 "1줄" --headline2 "2줄" \
 
 ### STEP 6 — 메타 JSON 저장 (`output/news/YYYY-MM-DD_키워드_N.json`)
 
+JSON은 반드시 **UTF-8 without BOM**으로 저장한다. PowerShell 5.1의
+`Set-Content -Encoding UTF8`은 BOM을 붙이므로 사용하지 말고, Python의
+`json.dump(..., ensure_ascii=False)` 또는 `.NET UTF8Encoding($false)`를 사용한다.
+
 ```json
 {
   "news_title": "기사 제목",
@@ -277,6 +281,7 @@ $action  = New-ScheduledTaskAction -Execute "powershell.exe" `
   -Argument '-NoProfile -ExecutionPolicy Bypass -File "C:\Users\hyein\Documents\hyein-projects\art-tool\tools\run_daily_news_codex.ps1"'
 $trigger = New-ScheduledTaskTrigger -Daily -At 16:07
 $set     = New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun `
+  -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
   -ExecutionTimeLimit (New-TimeSpan -Hours 1)
 Register-ScheduledTask -TaskName "피아트_일일뉴스_Codex" `
   -Action $action -Trigger $trigger -Settings $set `

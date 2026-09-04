@@ -121,6 +121,10 @@ python tools/news_poster.py \
 
 ## STEP 6 — 메타 JSON 저장 (2건 각각)
 
+JSON은 반드시 **UTF-8 without BOM**으로 저장한다. PowerShell 5.1의
+`Set-Content -Encoding UTF8`은 BOM을 붙이므로 사용하지 말고, Python의
+`json.dump(..., ensure_ascii=False)` 또는 `.NET UTF8Encoding($false)`를 사용한다.
+
 `output/news/YYYY-MM-DD_키워드_N.json`:
 
 ```json
@@ -147,7 +151,7 @@ from datetime import date
 from tools.article_parser import http_get
 bad = 0
 for f in sorted(glob.glob(f"output/news/{date.today().isoformat()}_*.json")):
-    d = json.load(open(f, encoding="utf-8"))
+    d = json.load(open(f, encoding="utf-8-sig"))
     for key in ("news_url", "image_url"):
         u = d.get(key, "")
         try: ok = http_get(u).status_code == 200

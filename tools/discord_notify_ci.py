@@ -95,7 +95,9 @@ def main() -> int:
     parser.add_argument("meta_path")
     args = parser.parse_args()
 
-    with open(args.meta_path, "r", encoding="utf-8") as f:
+    # PowerShell 5.1의 `-Encoding UTF8`은 BOM을 붙일 수 있다. 예약 실행이
+    # 만든 메타데이터도 안전하게 읽도록 utf-8-sig를 사용한다.
+    with open(args.meta_path, "r", encoding="utf-8-sig") as f:
         meta = json.load(f)
 
     image_path = meta.get("image_path") or (
