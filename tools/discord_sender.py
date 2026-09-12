@@ -57,8 +57,8 @@ def send_news_to_discord(
         candidates_text = "\n".join(lines)
 
     embed = {
-        "title": "🎨 p.art_mag 오늘의 뉴스",
-        "color": 3447003,
+        "title": os.environ.get("DISCORD_EMBED_TITLE") or "🎨 p.art_mag 오늘의 뉴스",
+        "color": int(os.environ.get("DISCORD_EMBED_COLOR") or 3447003),
         "image": {"url": f"attachment://{filename}"},
         "fields": [
             {
@@ -98,6 +98,9 @@ def send_news_to_discord(
     })
 
     payload = {"embeds": [embed]}
+    _username = os.environ.get("DISCORD_USERNAME")
+    if _username:
+        payload["username"] = _username
 
     with open(image_path, "rb") as f:
         files = {"file": (filename, f, "image/png")}

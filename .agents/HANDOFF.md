@@ -1,3 +1,53 @@
+## 2026-09-12 / claude — 배경 이미지 누락 버그 수정 + 브랜드 레이어 (작업 중)
+
+- 한 일:
+  1. **[버그 수정]** `article_parser.http_get` 이 curl_cffi 실패 시 곧장 일반 requests 로 폴백하는데,
+     AP·연합 CDN 은 일반 requests 를 403 으로 막는다. 즉 **네트워크가 한 번 느려 타임아웃되면
+     배경 사진이 빠진 썸네일이 그대로 발행됐다.** 실측: 문제의 AP 이미지는 18.5MB 이고 콜드 캐시에서
+     15초를 넘겼으며, 캐시가 데워진 뒤엔 0.5초였다. → 타임아웃·일시 오류일 때 curl_cffi 를
+     **3배 타임아웃으로 1회 재시도**한 뒤에야 폴백하도록 고쳤다. 403·404 같은 명시적 거절은 재시도 안 한다.
+     수정 후 같은 이미지로 재생성해 상단 표준편차 40.1(단색이면 12 미만) 확인.
+     🔴 이건 p;art 본 발행에도 영향을 주던 기존 버그다.
+  2. **[브랜드 레이어]** 한 파이프라인으로 여러 피드를 굴리기 위한 얇은 레이어를 넣었다.
+     `tools/brand.py` 가 `tools/brands/*.json` 을 읽어 환경변수로 펼치고, `news_poster` 는
+     `NEWS_LOGO_PATH`, `discord_sender` 는 `DISCORD_USERNAME`/`DISCORD_EMBED_TITLE`/`DISCORD_EMBED_COLOR`
+     를 본다. `discord_notify_ci.py --brand <이름>` 으로 진입한다.
+     **브랜드를 지정하지 않으면 전부 기본값이라 기존 p;art 경로는 동작이 동일하다.**
+  3. 새 디스코드 채널 `n8n-work` 웹훅을 `.env` 의 `DISCORD_WEBHOOK_N8N_WORK` 에 넣었다(gitignore 확인).
+     카드뉴스·경제·n8n 로그를 **이 채널 하나로** 보낸다는 것이 사용자 결정이다.
+  4. 경제 카드뉴스 소재 조사를 `notes/경제카드뉴스_소스조사_20260912.md` 에 남겼다.
+
+- 지금 상태(빌드/테스트 통과 여부): 브랜드 적용 → 썸네일 생성 → Discord 전송을 실제로 돌려
+  HTTP 200 및 embed 이미지 등록(2160x2700)까지 확인했다. Python 구문 검사 통과.
+  Claude 루틴 `daily-news-thumbnail` 은 재활성 상태(16:07 KST, sonnet-5, 지각 컷오프 포함).
+  ChatGPT 웹 예약은 사용자가 해제했다.
+
+- 다음에 할 일:
+  1. 🔴 **아트뉴스 계정 이름 확정 대기.** 추천은 **문화면**.
+     `ART*` 조합은 전부 선점됐고(ARTnews·ArtDaily·ARTPICK·ARTLOG·ARTFEED·ARTZIP·ARTDESK·ARTBEAT),
+     **ON VIEW 는 검토했다가 철회했다** — `curation.md:6,11,17` 이 "전시 소개 계정이 아니다 /
+     장르 무제한 / '지금 전시 중'은 사건이 아니다"라고 못박고 있어서 이름이 규칙과 정면으로 어긋난다.
+     실제 범위는 영화·웹툰·공연·K팝·출판을 포함한 **문화예술 전 장르**다.
+     경쟁자: 널 위한 문화예술(@cultureart4u) 20만 팔로워.
+     → 확정되면 `tools/brands/onview.json` 이름과 `label`·`username`·로고를 교체한다.
+     현재 `tools/assets/logo_onview.png` 와 `logo_econ.png` 는 **임시 텍스트 로고**다.
+  2. 경제 카드뉴스 **구조만** 설계 (사용자 지시). 쇼츠 출력까지 감안할 것.
+     확정된 형식 = 오늘 뉴스에서 키워드 1개 추출 → 표지 `키워드? 뭘까` → 6장 캐러셀.
+     정의 근거는 한국은행 경제금융용어 700선(개념·배경·사례·시사점 구조가 슬라이드와 1:1).
+  3. 노션에 있는 기존 Meta/인스타 API 키를 찾아 종류를 확인한다. 만료됐다면 60일짜리 장기 토큰일
+     가능성이 크고, **시스템 사용자 토큰(무기한)** 으로 재발급하면 반복이 사라진다.
+  4. 인스타 자동 발행은 Graph API Content Publishing 으로 간다(화면 매크로 아님).
+     이미지는 퍼블릭 레포의 `raw.githubusercontent.com` URL 을 그대로 쓴다. 관문은 **Meta 앱 검수**.
+
+- 주의점(함정, 건드리면 안 되는 것):
+  - **웹훅·토큰을 브랜드 JSON 에 절대 적지 않는다.** 이 레포는 PUBLIC 이다. 브랜드 JSON 은
+    `"webhook_env": "DISCORD_WEBHOOK_N8N_WORK"` 처럼 **어느 환경변수에서 읽을지만** 적는다.
+  - 히스토리 스캔 결과 구 웹훅 하나가 커밋에 남아 있으나(`b629663`~`9732941`) **이미 폐기됨(HTTP 404)** 이라
+    실질 위험은 없다.
+  - `(1)` 이 붙은 파일들은 사용자 소유 중복 사본이다. 건드리지 않는다.
+  - 자동 발행 브랜치는 계속 `claude/*` 여야 한다. `discord-notify.yml` 트리거 조건이다.
+  - Claude 루틴 / ChatGPT 웹 예약 / Windows 작업은 **한 번에 하나만** 켠다.
+
 ## 2026-09-12 / claude — Claude 클라우드 루틴으로 원복
 - 한 일: 주 실행을 ChatGPT Work 웹 예약에서 **Claude 클라우드 루틴 `daily-news-thumbnail`(trig_017iyKdNniT7vbLzPi6LQokP)** 로 되돌렸다. 2026-09-03 이후 꺼져 있던 루틴을 다시 켜고 세 가지를 정제했다. ①모델 `claude-sonnet-4-6` → `claude-sonnet-5` ②루틴 프롬프트의 "3건"을 스킬과 맞춰 "정확히 2건"으로 수정 ③**지각 컷오프를 루틴 프롬프트에 신설**(STEP -1, KST 16:00~19:30 밖 실행이면 발행하지 않고 폴백에 위임). 컷오프는 그동안 GitHub Actions 폴백에만 있었고 루틴 경로에는 없었다 — 2026-08-29 05:58, 2026-09-01 02:13 새벽 발행 사고의 직접 원인이다. CLAUDE.md 스케줄 표와 notes/CODEX_DAILY_NEWS.md 운영 상태 블록도 함께 갱신했다.
 - 지금 상태(빌드/테스트 통과 여부): 루틴 enabled=true, 크론 `7 7 * * *` UTC, next_run 2026-09-12T07:07:00Z(16:07 KST). 사용자가 ChatGPT 웹 예약을 해제한 것을 확인했다. Windows 작업 `피아트_일일뉴스_Codex`는 Disabled 유지. GitHub Actions 폴백(17:11/17:51/18:31 KST)은 그대로 둔다. 코드 변경 없음(문서·루틴 설정만).

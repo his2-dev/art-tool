@@ -62,7 +62,8 @@ CLASH_DISPLAY_MEDIUM = _find_font("ClashDisplay-Medium.otf")
 
 # 에셋 경로
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
-LOGO_PATH = os.path.join(ASSETS_DIR, "logo_w.png")
+# 브랜드별로 로고를 갈아끼운다. NEWS_LOGO_PATH 미설정이면 기존 p;art 로고 그대로 사용한다.
+LOGO_PATH = os.environ.get("NEWS_LOGO_PATH") or os.path.join(ASSETS_DIR, "logo_w.png")
 
 # 레이아웃 (Figma 기준 상대좌표)
 LOGO_POS = (72, 72)

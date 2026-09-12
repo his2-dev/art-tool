@@ -93,7 +93,19 @@ def _generate(meta: dict, image_path: str, image_url: str) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="메타 JSON을 읽어 이미지 생성 후 Discord 전송")
     parser.add_argument("meta_path")
+    parser.add_argument(
+        "--brand",
+        default=os.environ.get("NEWS_BRAND"),
+        help="브랜드 프로파일 이름 (tools/brands/*.json). 생략하면 기존 p;art 설정 그대로.",
+    )
     args = parser.parse_args()
+
+    # 브랜드 지정이 없으면 아무것도 바꾸지 않는다 — 기존 p;art 발행 경로 보존.
+    if args.brand:
+        from tools.brand import apply_brand, load_dotenv
+        load_dotenv()  # 로컬 실행용. CI에는 .env가 없어 no-op.
+        cfg = apply_brand(args.brand)
+        print(f"[브랜드] {args.brand} — {cfg.get('label','')}", file=sys.stderr)
 
     # PowerShell 5.1의 `-Encoding UTF8`은 BOM을 붙일 수 있다. 예약 실행이
     # 만든 메타데이터도 안전하게 읽도록 utf-8-sig를 사용한다.

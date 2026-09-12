@@ -1,0 +1,22 @@
+{
+  "label": "경제 용어 카드뉴스",
+  "logo": "tools/assets/logo_econ.png",
+  "discord": {
+    "username": "경제 뭘까",
+    "embed_title": "오늘의 경제 용어",
+    "embed_color": 3066993,
+    "webhook_env": "DISCORD_WEBHOOK_N8N_WORK"
+  },
+  "feed": {
+    "kind": "term_carousel",
+    "items": 1,
+    "curation": "keyword_of_day",
+    "slides": 6,
+    "cover_format": "{keyword}? 뭘까",
+    "outputs": [
+      "carousel",
+      "shorts"
+    ]
+  },
+  "note": "아트뉴스와 파이프라인이 다르다. 뉴스 카드가 아니라 용어 설명 캐러셀이다. 쇼츠 출력도 같은 원고에서 뽑는다."
+}

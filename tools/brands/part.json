@@ -1,0 +1,16 @@
+{
+  "label": "p;art 아트뉴스 (기존 — 건드리지 않음)",
+  "logo": null,
+  "discord": {
+    "username": null,
+    "embed_title": null,
+    "embed_color": null,
+    "webhook_env": "DISCORD_WEBHOOK_URL"
+  },
+  "feed": {
+    "kind": "news",
+    "items": 2,
+    "curation": "manual_gate"
+  },
+  "note": "전부 null이면 코드 기본값(p;art)이 그대로 쓰인다. 이 브랜드는 기존 동작 보존용이다."
+}

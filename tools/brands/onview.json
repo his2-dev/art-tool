@@ -1,0 +1,16 @@
+{
+  "label": "ON VIEW — 아트뉴스 (큐레이션 무보정 발행)",
+  "logo": "tools/assets/logo_onview.png",
+  "discord": {
+    "username": "ON VIEW",
+    "embed_title": "ON VIEW · 오늘의 전시 소식",
+    "embed_color": 10038562,
+    "webhook_env": "DISCORD_WEBHOOK_N8N_WORK"
+  },
+  "feed": {
+    "kind": "news",
+    "items": 2,
+    "curation": "as_is"
+  },
+  "note": "기존 daily-news 파이프라인과 완전히 동일하다. 사람 선별 없이 큐레이션이 고른 2건을 그대로 낸다. p;art 본 발행과 같은 산출물을 브랜드만 바꿔 한 번 더 보내는 것이라 추가 크롤링이 없다. 이름 근거: 미술관이 '전시 중'을 표기할 때 쓰는 표준 용어."
+}
