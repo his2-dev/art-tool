@@ -1,9 +1,11 @@
 # Codex/ChatGPT 인수인계 — p.art_mag 일일 뉴스 발행
 
-> **현재 운영 상태 (2026-09-04)**: ChatGPT Work 웹 클라우드 예약 작업 `피아트 일일 뉴스`가
-> 매일 16:07 KST에 실행된다. GitHub의 `his2-dev/art-tool`을 직접 읽고 `claude/news-YYYYMMDD`
-> 브랜치로 푸시한다. 로컬 Windows 예약 작업 `피아트_일일뉴스_Codex`는 중복 방지를 위해
-> 비활성화했으며, 아래 로컬 Codex CLI/Windows 지침은 장애 시 복구용으로만 보존한다.
+> **현재 운영 상태 (2026-09-12)**: 주 실행이 **Claude 클라우드 루틴 `daily-news-thumbnail`**로
+> 돌아왔다. 매일 16:07 KST(크론 `7 7 * * *` UTC), 모델 `claude-sonnet-5`, 루틴 프롬프트에 지각
+> 컷오프(KST 16:00~19:30 밖이면 그날 거름)가 들어 있다.
+> ChatGPT Work 웹 예약 `피아트 일일 뉴스`(2026-09-04~09-11 운영)는 **해제했고**, 로컬 Windows
+> 예약 작업 `피아트_일일뉴스_Codex`도 비활성이다. 아래 로컬 Codex CLI/Windows 지침은 장애 시
+> 복구용으로만 보존한다. **셋 중 하나만 켠다 — 둘 이상 켜면 중복 발행된다.**
 
 > 대상: Codex CLI (`codex exec`). 기존 Claude 클라우드 루틴(`daily-news-thumbnail`, 매일 16:07 KST)을
 > **로컬 PC의 Codex + 윈도우 예약작업**으로 대체하기 위한 지침이다.

@@ -218,11 +218,14 @@ python tools/news_poster.py \
 
 | 항목 | 내용 |
 |------|------|
-| 주 실행 | ChatGPT Work 웹 클라우드 예약 `피아트 일일 뉴스` |
-| 대상 | GitHub `his2-dev/art-tool`의 `main` → `claude/news-YYYYMMDD` |
-| 실행 시간 | 매일 16:07 KST (17:07은 5시간 세션 한도에 매번 걸려 실패했다 — 한 시간 앞당겨 회피) |
+| 주 실행 | Claude 클라우드 루틴 `daily-news-thumbnail` (2026-09-12 복귀) |
+| 대상 | GitHub `his2-dev/art-tool`의 `main` → `claude/*` 작업 브랜치 |
+| 실행 시간 | 매일 16:07 KST = 크론 `7 7 * * *` UTC (17:07은 5시간 세션 한도에 매번 걸려 실패했다 — 한 시간 앞당겨 회피) |
+| 모델 | `claude-sonnet-5` |
+| 지각 컷오프 | 루틴 프롬프트 STEP -1. 실행 시각이 KST 16:00~19:30 밖이면 발행하지 않고 그날은 폴백에 맡긴다 |
 | 동작 | 뉴스 2건 선별 → 이미지 생성 → 커밋·푸시 → Discord 전송 |
 | 파이프라인 | `.claude/skills/daily-news/` (daily-news 스킬) |
 | 폴백 | GitHub Actions `daily-news.yml` 17:11/17:51/18:31 KST 시도 (당일 발행물이 main 또는 `claude/*`에 있으면 스킵, KST 16:50~19:30 밖 실행이면 그날 거름) |
-| 로컬 복구용 | Windows 작업 `피아트_일일뉴스_Codex` — 현재 비활성(웹 예약과 동시 활성화 금지) |
-| 관리 | ChatGPT 웹/데스크톱 → Scheduled |
+| 복구용(비활성) | ChatGPT Work 웹 예약 `피아트 일일 뉴스` (2026-09-04~09-11 운영 후 해제) · Windows 작업 `피아트_일일뉴스_Codex` |
+| 🔴 동시 활성화 금지 | Claude 루틴 / 웹 예약 / Windows 작업 중 **한 번에 하나만** 켠다. 둘 이상 켜면 같은 날 4건이 나간다 |
+| 관리 | https://claude.ai/code/routines/trig_017iyKdNniT7vbLzPi6LQokP |
