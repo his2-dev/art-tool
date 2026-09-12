@@ -22,22 +22,44 @@ DEFAULT_HEADERS = {
 
 def http_get(url: str, timeout: int = 15):
     """GET 요청. curl_cffi가 설치돼 있으면 Chrome TLS 핑거프린트로 우회 시도 후,
-    실패하면 일반 requests로 폴백. 한국 뉴스 사이트의 봇 차단(403) 대응용."""
+    실패하면 일반 requests로 폴백. 한국 뉴스 사이트의 봇 차단(403) 대응용.
+
+    🔴 curl_cffi 가 한 번 실패했다고 곧장 일반 requests 로 내려가면 안 된다.
+    AP·연합 같은 CDN 은 일반 requests 를 403 으로 막기 때문에, 네트워크가 잠깐
+    느렸을 뿐인데도 "차단당했다"는 결과가 나온다. 실제로 2026-09-12 에 콜드 캐시로
+    첫 요청이 타임아웃되자 폴백이 403 을 받아, 배경 사진이 빠진 썸네일이 발행됐다.
+    그래서 타임아웃·일시 오류일 때는 curl_cffi 를 넉넉한 시간으로 한 번 더 시도한다.
+    """
+    cf_requests = None
     try:
-        from curl_cffi import requests as cf_requests
-        r = cf_requests.get(
-            url,
-            impersonate="chrome120",
-            timeout=timeout,
-            allow_redirects=True,
-            headers={"Accept-Language": DEFAULT_HEADERS["Accept-Language"]},
-        )
-        if r.status_code == 200:
-            return r
+        from curl_cffi import requests as cf_requests  # noqa: F811
     except ImportError:
-        pass
-    except Exception:
-        pass
+        cf_requests = None
+
+    if cf_requests is not None:
+        headers = {
+            "Accept-Language": DEFAULT_HEADERS["Accept-Language"],
+            "User-Agent": DEFAULT_HEADERS["User-Agent"],
+        }
+        # 2회차는 타임아웃을 3배로. 큰 원본 이미지(수십 MB)는 첫 바이트가 늦게 온다.
+        for attempt, t in enumerate((timeout, timeout * 3), start=1):
+            try:
+                r = cf_requests.get(
+                    url,
+                    impersonate="chrome120",
+                    timeout=t,
+                    allow_redirects=True,
+                    headers=headers,
+                )
+                if r.status_code == 200:
+                    return r
+                # 403·404 처럼 서버가 명시적으로 거절한 것은 재시도해도 같다.
+                break
+            except Exception as e:
+                if attempt == 2:
+                    print(f"[경고] curl_cffi 2회 실패 ({url[:70]}): "
+                          f"{type(e).__name__}", file=sys.stderr)
+
     r = requests.get(url, headers=DEFAULT_HEADERS, timeout=timeout, allow_redirects=True)
     r.raise_for_status()
     return r
